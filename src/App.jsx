@@ -14,6 +14,114 @@ const USER_PROGRESS_KEY = "aq_user_progress_v1";
 const SHARED_LEADERBOARD_API = "/api/leaderboard";
 const ADMIN_PIN = import.meta.env.VITE_ADMIN_PIN || "";
 
+const PUZZLES = [
+  {
+    id: 1,
+    title: "The Component Hand",
+    subtitle: "Build a basic Angular component",
+    icon: "🃏",
+    difficulty: "Easy",
+    chips: 200,
+    hint: "Decorator first, then class with selector & template",
+    lines: [
+      { id: "a", code: "@Component({", color: "#8a6400" },
+      { id: "b", code: "  selector: 'app-root',", color: "#0d5f80" },
+      { id: "c", code: "  template: `<h1>Hello</h1>`", color: "#1f7a5c" },
+      { id: "d", code: "})", color: "#8a6400" },
+      { id: "e", code: "export class AppComponent {}", color: "#6f3db4" },
+    ],
+  },
+  {
+    id: 2,
+    title: "The Service Flush",
+    subtitle: "Injectable service declaration",
+    icon: "♠",
+    difficulty: "Easy",
+    chips: 300,
+    hint: "Import Injectable, decorate, then export the class",
+    lines: [
+      { id: "a", code: "import { Injectable } from '@angular/core';", color: "#0d5f80" },
+      { id: "b", code: "@Injectable({", color: "#8a6400" },
+      { id: "c", code: "  providedIn: 'root'", color: "#1f7a5c" },
+      { id: "d", code: "})", color: "#8a6400" },
+      { id: "e", code: "export class DataService {}", color: "#6f3db4" },
+    ],
+  },
+  {
+    id: 3,
+    title: "The NgModule Royal",
+    subtitle: "Declare and bootstrap a module",
+    icon: "♦",
+    difficulty: "Medium",
+    chips: 500,
+    hint: "Import NgModule, decorate with declarations & bootstrap",
+    lines: [
+      { id: "a", code: "import { NgModule } from '@angular/core';", color: "#0d5f80" },
+      { id: "b", code: "import { BrowserModule } from '@angular/platform-browser';", color: "#0d5f80" },
+      { id: "c", code: "@NgModule({", color: "#8a6400" },
+      { id: "d", code: "  imports: [BrowserModule],", color: "#a35000" },
+      { id: "e", code: "  declarations: [AppComponent],", color: "#1f7a5c" },
+      { id: "f", code: "  bootstrap: [AppComponent]", color: "#b02f4b" },
+      { id: "g", code: "})", color: "#8a6400" },
+      { id: "h", code: "export class AppModule {}", color: "#6f3db4" },
+    ],
+  },
+  {
+    id: 4,
+    title: "The Router Straight",
+    subtitle: "Set up Angular routing",
+    icon: "♥",
+    difficulty: "Medium",
+    chips: 600,
+    hint: "Define routes array, then pass to RouterModule.forRoot",
+    lines: [
+      { id: "a", code: "import { RouterModule, Routes } from '@angular/router';", color: "#0d5f80" },
+      { id: "b", code: "const routes: Routes = [", color: "#8a6400" },
+      { id: "c", code: "  { path: '', component: HomeComponent },", color: "#1f7a5c" },
+      { id: "d", code: "  { path: 'about', component: AboutComponent }", color: "#1f7a5c" },
+      { id: "e", code: "];", color: "#8a6400" },
+      { id: "f", code: "RouterModule.forRoot(routes)", color: "#6f3db4" },
+    ],
+  },
+  {
+    id: 5,
+    title: "The Observable Jackpot",
+    subtitle: "RxJS Observable chain",
+    icon: "★",
+    difficulty: "Hard",
+    chips: 1000,
+    hint: "Import operators, create observable, then pipe and subscribe",
+    lines: [
+      { id: "a", code: "import { of } from 'rxjs';", color: "#0d5f80" },
+      { id: "b", code: "import { map, filter } from 'rxjs/operators';", color: "#0d5f80" },
+      { id: "c", code: "const source$ = of(1, 2, 3, 4, 5);", color: "#8a6400" },
+      { id: "d", code: "source$.pipe(", color: "#a35000" },
+      { id: "e", code: "  filter(n => n % 2 === 0),", color: "#b02f4b" },
+      { id: "f", code: "  map(n => n * 10)", color: "#1f7a5c" },
+      { id: "g", code: ").subscribe(console.log);", color: "#6f3db4" },
+    ],
+  },
+  {
+    id: 6,
+    title: "The Reactive Form Bluff",
+    subtitle: "Build a reactive form",
+    icon: "🎰",
+    difficulty: "Hard",
+    chips: 1200,
+    hint: "Import FormBuilder, inject in constructor, then build the group",
+    lines: [
+      { id: "a", code: "import { FormBuilder, Validators } from '@angular/forms';", color: "#0d5f80" },
+      { id: "b", code: "constructor(private fb: FormBuilder) {}", color: "#8a6400" },
+      { id: "c", code: "this.form = this.fb.group({", color: "#a35000" },
+      { id: "d", code: "  name: ['', Validators.required],", color: "#1f7a5c" },
+      { id: "e", code: "  email: ['', Validators.email]", color: "#1f7a5c" },
+      { id: "f", code: "});", color: "#8a6400" },
+    ],
+  },
+];
+
+const PUZZLE_DIFFICULTY_COLORS = { Easy: "#1f7a5c", Medium: "#8a6400", Hard: "#b02f4b" };
+
 let sqliteDbPromise;
 
 function openIndexedDb() {
@@ -88,7 +196,7 @@ async function sqliteSetJson(key, value) {
 async function fetchSharedLeaderboard() {
   const response = await fetch(SHARED_LEADERBOARD_API, { method: "GET" });
   if (!response.ok) {
-    let message = "Unable to fetch leaderboard";
+    let message = `Unable to fetch leaderboard (${response.status})`;
     try { const payload = await response.json(); if (payload?.detail) message = payload.detail; } catch (_) {}
     throw new Error(message);
   }
@@ -100,7 +208,7 @@ async function fetchSharedLeaderboard() {
 async function pushSharedLeaderboardEntry(entry) {
   const response = await fetch(SHARED_LEADERBOARD_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry) });
   if (!response.ok) {
-    let message = "Unable to update leaderboard";
+    let message = `Unable to update leaderboard (${response.status})`;
     try { const payload = await response.json(); if (payload?.detail) message = payload.detail; } catch (_) {}
     throw new Error(message);
   }
@@ -190,6 +298,19 @@ function shuffleQuestionsInLevels(levels) {
   return levels.map(level => ({ ...level, questions: shuffleArray(level.questions) }));
 }
 
+function shufflePuzzleLines(items) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function isPuzzleOrderCorrect(current, original) {
+  return current.every((item, i) => item.id === original[i].id);
+}
+
 // ─── CASINO COMPONENTS ──────────────────────────────────────────────────────
 
 function NeonText({ children, color = "#ffd700", size = "inherit", weight = 900, style = {} }) {
@@ -247,7 +368,7 @@ function GoldDivider() {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0" }}>
       <div style={{ flex: 1, height: 1, background: "linear-gradient(90deg, transparent, #ffd700, transparent)" }} />
-      <span style={{ color: "#ffd700", fontSize: 16, textShadow: "0 0 10px #ffd700" }}>♦</span>
+      <span style={{ color: "#8a6400", fontSize: 16 }}>♦</span>
       <div style={{ flex: 1, height: 1, background: "linear-gradient(90deg, transparent, #ffd700, transparent)" }} />
     </div>
   );
@@ -268,7 +389,10 @@ function Confetti({ active }) {
           borderRadius: Math.random() > 0.5 ? "50%" : 2,
           background: colors[i % colors.length],
           boxShadow: `0 0 6px ${colors[i % colors.length]}`,
-          animation: `confFall ${1 + Math.random() * 1.6}s ease-in forwards`,
+          animationName: "confFall",
+          animationDuration: `${1 + Math.random() * 1.6}s`,
+          animationTimingFunction: "ease-in",
+          animationFillMode: "forwards",
           animationDelay: `${Math.random() * 1}s`,
           transform: `rotate(${Math.random() * 360}deg)`,
         }} />
@@ -285,7 +409,10 @@ function LivesDisplay({ lives }) {
           fontSize: 20,
           filter: i < lives ? "drop-shadow(0 0 6px #ff3366)" : "grayscale(1) opacity(0.3)",
           transition: "all 0.3s",
-          animation: i < lives ? "heartPulse 1.5s ease-in-out infinite" : "none",
+          animationName: i < lives ? "heartPulse" : "none",
+          animationDuration: "1.5s",
+          animationTimingFunction: "ease-in-out",
+          animationIterationCount: "infinite",
           animationDelay: `${i * 0.2}s`
         }}>♥</div>
       ))}
@@ -332,7 +459,7 @@ function ScorePopup({ pts, speed, multiplier }) {
       animation: "scoreFloat 2s ease-out forwards",
       textAlign: "center", pointerEvents: "none"
     }}>
-      <div style={{ fontSize: 42, fontWeight: 900, color: "#ffd700", textShadow: "0 0 20px #ffd700, 0 0 40px #ffd70066", fontFamily: "'Playfair Display', serif" }}>
+      <div style={{ fontSize: 42, fontWeight: 900, color: "#8a6400", textShadow: "0 1px 0 rgba(255,255,255,0.45)", fontFamily: "'Playfair Display', serif" }}>
         +{pts}
       </div>
       {multiplier > 1 && (
@@ -377,8 +504,25 @@ export default function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [userProgress, setUserProgress] = useState(null);
   const [showScorePop, setShowScorePop] = useState(false);
+  const [sharedLeaderboardEnabled, setSharedLeaderboardEnabled] = useState(true);
+  const [puzzleSelected, setPuzzleSelected] = useState(null);
+  const [puzzleLines, setPuzzleLines] = useState([]);
+  const [puzzleDragFrom, setPuzzleDragFrom] = useState(null);
+  const [puzzleDragOver, setPuzzleDragOver] = useState(null);
+  const [puzzleSolved, setPuzzleSolved] = useState(false);
+  const [puzzleShowResult, setPuzzleShowResult] = useState(false);
+  const [puzzleAttempts, setPuzzleAttempts] = useState(0);
+  const [puzzleChips, setPuzzleChips] = useState(1000);
+  const [puzzleCompletedIds, setPuzzleCompletedIds] = useState(new Set());
+  const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(0);
+  const [puzzleTimerMax, setPuzzleTimerMax] = useState(0);
+  const [puzzleHintUsed, setPuzzleHintUsed] = useState(false);
+  const [puzzleShowHint, setPuzzleShowHint] = useState(false);
+  const [puzzleStreak, setPuzzleStreak] = useState(0);
+  const [puzzleLastWin, setPuzzleLastWin] = useState(null);
   const importFileRef = useRef(null);
   const timer = useRef(null);
+  const puzzleTimer = useRef(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -404,6 +548,7 @@ export default function App() {
   }, []);
 
   const refreshLeaderboard = useCallback(async ({ clearOnError = false } = {}) => {
+    if (!sharedLeaderboardEnabled) return;
     try {
       const remote = await fetchSharedLeaderboard();
       setLeaderboard(remote);
@@ -413,17 +558,27 @@ export default function App() {
       const msg = error instanceof Error ? error.message : "Unable to load shared leaderboard.";
       setLeaderboardError(msg);
       if (clearOnError) setLeaderboard([]);
+      if (msg.includes("404")) {
+        setSharedLeaderboardEnabled(false);
+        try {
+          const cached = await sqliteGetJson(LEADERBOARD_CACHE_KEY);
+          if (Array.isArray(cached)) setLeaderboard(cached);
+        } catch (_) {}
+      }
     }
-  }, []);
-
-  useEffect(() => { refreshLeaderboard({ clearOnError: true }); }, [refreshLeaderboard]);
+  }, [sharedLeaderboardEnabled]);
 
   useEffect(() => {
-    if (screen !== "leaderboard") return undefined;
+    if (!sharedLeaderboardEnabled) return;
+    refreshLeaderboard({ clearOnError: true });
+  }, [refreshLeaderboard, sharedLeaderboardEnabled]);
+
+  useEffect(() => {
+    if (screen !== "leaderboard" || !sharedLeaderboardEnabled) return undefined;
     refreshLeaderboard();
     const id = setInterval(() => refreshLeaderboard(), 4000);
     return () => clearInterval(id);
-  }, [screen, refreshLeaderboard]);
+  }, [screen, refreshLeaderboard, sharedLeaderboardEnabled]);
 
   const level = levels[levelIdx];
   const question = level?.questions[qIdx];
@@ -441,6 +596,7 @@ export default function App() {
       } catch (error) {
         const msg = error instanceof Error ? error.message : "Unable to update shared leaderboard.";
         setLeaderboardError(msg);
+        if (msg.includes("404")) setSharedLeaderboardEnabled(false);
       }
     })();
   }, []);
@@ -518,8 +674,103 @@ export default function App() {
   const goLeaderboard = (from) => { setPrevScreen(from); setScreen("leaderboard"); };
   const goAdminLogin = (from) => { setPrevScreen(from); setAdminNotice(""); setAdminPinInput(""); setScreen("adminLogin"); };
 
+  const startPuzzle = (puzzle) => {
+    clearTimeout(puzzleTimer.current);
+    setPuzzleSelected(puzzle);
+    setPuzzleLines(shufflePuzzleLines(puzzle.lines));
+    setPuzzleSolved(false);
+    setPuzzleShowResult(false);
+    setPuzzleAttempts(0);
+    setPuzzleHintUsed(false);
+    setPuzzleShowHint(false);
+    setPuzzleLastWin(null);
+    const maxTime = puzzle.difficulty === "Easy" ? 90 : puzzle.difficulty === "Medium" ? 120 : 180;
+    setPuzzleTimeLeft(maxTime);
+    setPuzzleTimerMax(maxTime);
+    setScreen("puzzleGame");
+  };
+
+  const handlePuzzleDrop = (toIndex) => {
+    if (puzzleDragFrom === null || puzzleDragFrom === toIndex) {
+      setPuzzleDragFrom(null);
+      setPuzzleDragOver(null);
+      return;
+    }
+    const newLines = [...puzzleLines];
+    const [moved] = newLines.splice(puzzleDragFrom, 1);
+    newLines.splice(toIndex, 0, moved);
+    setPuzzleLines(newLines);
+    setPuzzleDragFrom(null);
+    setPuzzleDragOver(null);
+  };
+
+  const handlePuzzleCheck = (timedOut = false) => {
+    if (!puzzleSelected) return;
+    clearTimeout(puzzleTimer.current);
+    const correct = isPuzzleOrderCorrect(puzzleLines, puzzleSelected.lines);
+    setPuzzleShowResult(true);
+    setPuzzleAttempts(a => a + 1);
+
+    if (correct && !timedOut) {
+      setPuzzleSolved(true);
+      boom();
+      const timeBonus = Math.round((puzzleTimeLeft / Math.max(puzzleTimerMax, 1)) * 100);
+      const attemptsNow = puzzleAttempts + 1;
+      const perfectBonus = attemptsNow === 1 ? 200 : 0;
+      const hintPenalty = puzzleHintUsed ? Math.round(puzzleSelected.chips * 0.2) : 0;
+      const streakBonus = Math.round(puzzleStreak * 50);
+      const earned = puzzleSelected.chips + timeBonus + perfectBonus + streakBonus - hintPenalty;
+
+      setPuzzleChips(c => c + earned);
+      setPuzzleCompletedIds(ids => new Set([...ids, puzzleSelected.id]));
+      setPuzzleStreak(s => s + 1);
+      setPuzzleLastWin({ earned, timeBonus, perfectBonus, streakBonus, hintPenalty, timedOut: false });
+      setTimeout(() => setScreen("puzzleResult"), 1000);
+      return;
+    }
+
+    if (timedOut) {
+      const penalty = Math.round(puzzleSelected.chips * 0.3);
+      setPuzzleChips(c => Math.max(0, c - penalty));
+      setPuzzleStreak(0);
+      setPuzzleLastWin({ earned: -penalty, timedOut: true });
+      setTimeout(() => setScreen("puzzleResult"), 800);
+      return;
+    }
+
+    const penalty = 20 * (puzzleAttempts + 1);
+    setPuzzleChips(c => Math.max(0, c - penalty));
+    setTimeout(() => setPuzzleShowResult(false), 1200);
+  };
+
+  const handlePuzzleHint = () => {
+    if (puzzleHintUsed || puzzleSolved) return;
+    setPuzzleHintUsed(true);
+    setPuzzleShowHint(true);
+    setPuzzleChips(c => Math.max(0, c - 50));
+    setTimeout(() => setPuzzleShowHint(false), 3500);
+  };
+
+  const handlePuzzleShuffle = () => {
+    if (puzzleSolved) return;
+    setPuzzleLines(curr => shufflePuzzleLines(curr));
+    setPuzzleShowResult(false);
+    setPuzzleChips(c => Math.max(0, c - 10));
+  };
+
+  useEffect(() => {
+    if (screen !== "puzzleGame" || puzzleSolved || !puzzleSelected) return undefined;
+    if (puzzleTimeLeft <= 0 && puzzleTimerMax > 0) {
+      handlePuzzleCheck(true);
+      return undefined;
+    }
+    puzzleTimer.current = setTimeout(() => setPuzzleTimeLeft(t => t - 1), 1000);
+    return () => clearTimeout(puzzleTimer.current);
+  }, [screen, puzzleSolved, puzzleSelected, puzzleTimeLeft, puzzleTimerMax]);
+
   const zoneCount = levels.length;
   const totalQuestionCount = levels.reduce((t, z) => t + z.questions.length, 0);
+  const puzzleAllCompleted = puzzleCompletedIds.size === PUZZLES.length;
   const progress = level ? (qIdx / level.questions.length) * 100 : 0;
   const overallProgress = zoneCount === 0 ? 0 : Math.min(100, Math.round((((levelIdx) + (level ? qIdx / Math.max(level.questions.length, 1) : 0)) / zoneCount) * 100));
   const currentZoneIndex = Math.min(levelIdx + 1, Math.max(zoneCount, 1));
@@ -594,11 +845,11 @@ export default function App() {
     felt: "#ffffff",
     card: "#fffaf2",
     border: "#d4b24c66",
-    borderBright: "#ffd700",
+    borderBright: "#a77a00",
     text: "#2f2211",
     muted: "#735f45",
     faint: "#927d61",
-    gold: "#ffd700",
+    gold: "#8a6400",
     red: "#ff3366",
     green: "#00ffaa",
     cyan: "#00d4ff",
@@ -634,7 +885,7 @@ export default function App() {
         @keyframes heartPulse{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.15)} }
         @keyframes scoreFloat{ 0%{opacity:1;transform:translateY(0) scale(1)} 80%{opacity:1;transform:translateY(-60px) scale(1.1)} 100%{opacity:0;transform:translateY(-80px) scale(0.9)} }
         @keyframes goldShimmer{ 0%{background-position:200% center} 100%{background-position:-200% center} }
-        @keyframes marqueeGlow{ 0%,100%{box-shadow:0 0 20px #ffd70066,0 0 40px #ffd70033} 50%{box-shadow:0 0 30px #ffd700aa,0 0 60px #ffd70055} }
+        @keyframes marqueeGlow{ 0%,100%{box-shadow:0 4px 16px rgba(67,44,7,0.12)} 50%{box-shadow:0 8px 22px rgba(67,44,7,0.16)} }
         @keyframes borderDance{ 0%{border-color:#ffd700} 25%{border-color:#ff3366} 50%{border-color:#00ffaa} 75%{border-color:#00d4ff} 100%{border-color:#ffd700} }
         @keyframes spinIn    { from{transform:rotateY(90deg);opacity:0} to{transform:rotateY(0deg);opacity:1} }
         @keyframes tickerScroll{ 0%{transform:translateX(100%)} 100%{transform:translateX(-100%)} }
@@ -726,10 +977,8 @@ export default function App() {
               letterSpacing: 4,
               lineHeight: 1,
               margin: "0 0 8px",
-              background: "linear-gradient(180deg, #fff8e1 0%, #ffd700 40%, #ff8c00 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              filter: "drop-shadow(0 0 20px #ffd70066)",
+              color: "#4a3310",
+              textShadow: "0 1px 0 rgba(255,255,255,0.45)",
             }}>
               Angular Quest
             </div>
@@ -756,7 +1005,7 @@ export default function App() {
                   boxShadow: "inset 0 1px 0 rgba(255,215,0,0.1)"
                 }}>
                   <div style={{ fontSize: 26, marginBottom: 4, filter: "drop-shadow(0 0 6px currentColor)" }}>{em}</div>
-                  <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 22, color: C.gold, textShadow: "0 0 10px #ffd70088" }}>{t}</div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 22, color: C.gold }}>{t}</div>
                   <div style={{ color: C.faint, fontSize: 12, letterSpacing: 0.5, textTransform: "uppercase" }}>{s}</div>
                 </div>
               ))}
@@ -768,7 +1017,8 @@ export default function App() {
                 disabled={zoneCount === 0}
                 onClick={() => setScreen("namePicker")}
                 style={{
-                  background: zoneCount === 0 ? "#e8dcc4" : "linear-gradient(135deg, #ffd700, #ff8c00, #ffd700)",
+                  backgroundColor: zoneCount === 0 ? "#e8dcc4" : "#ffd700",
+                  backgroundImage: zoneCount === 0 ? "none" : "linear-gradient(135deg, #ffd700, #ff8c00, #ffd700)",
                   backgroundSize: "200% 100%",
                   color: zoneCount === 0 ? C.faint : "#3a2400",
                   padding: "15px 44px", borderRadius: 14, fontSize: 18,
@@ -788,10 +1038,266 @@ export default function App() {
                 }}>
                 🏆 Hall of Fame
               </button>
+              <button
+                className="casino-btn"
+                onClick={() => setScreen("puzzleLobby")}
+                style={{
+                  background: "rgba(255,255,255,0.75)", color: C.text,
+                  border: `1.5px solid ${C.border}`, padding: "15px 24px",
+                  borderRadius: 14, fontSize: 16, letterSpacing: 1
+                }}>
+                🧩 Code Poker
+              </button>
             </div>
 
             {leaderboardError && <div style={{ marginTop: 10, fontSize: 12, color: C.red, textAlign: "center", opacity: 0.8 }}>{leaderboardError}</div>}
             {zoneCount === 0 && <div style={{ marginTop: 10, fontSize: 12, color: C.faint, animation: "neonPulse 1.2s infinite" }}>Loading the deck…</div>}
+          </div>
+        </div>
+      )}
+
+      {/* ─── PUZZLE LOBBY ─────────────────────────────────────────────────── */}
+      {screen === "puzzleLobby" && (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "48px 20px 40px", animation: "fadeUp 0.4s ease" }}>
+          <div className="felt-table" style={{ borderRadius: 24, padding: "32px 28px", maxWidth: 980, width: "100%" }}>
+            <div style={{ textAlign: "center", marginBottom: 26 }}>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(40px,7vw,62px)", letterSpacing: 4, color: "#4a3310", marginBottom: 4 }}>
+                Code Poker
+              </div>
+              <div style={{ color: C.muted, fontSize: 14, letterSpacing: 1.2, textTransform: "uppercase" }}>Angular line-order puzzles in light mode</div>
+            </div>
+
+            <GoldDivider />
+
+            <div style={{ display: "flex", justifyContent: "center", gap: 36, margin: "18px 0 26px", flexWrap: "wrap" }}>
+              {[["🪙", puzzleChips.toLocaleString(), "Chips"], ["🔥", puzzleStreak, "Streak"], ["✓", `${puzzleCompletedIds.size}/${PUZZLES.length}`, "Solved"]].map(([icon, val, label]) => (
+                <div key={label} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 22, marginBottom: 2 }}>{icon}</div>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: C.gold, letterSpacing: 1 }}>{val}</div>
+                  <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="lobby-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14 }}>
+              {PUZZLES.map(puzzle => (
+                <button
+                  key={puzzle.id}
+                  className="casino-btn"
+                  onClick={() => startPuzzle(puzzle)}
+                  style={{
+                    textAlign: "left",
+                    background: "linear-gradient(135deg, #fffdfa, #f6efdf)",
+                    border: `1.5px solid ${C.border}`,
+                    borderRadius: 14,
+                    padding: "16px 16px 14px",
+                    boxShadow: puzzleCompletedIds.has(puzzle.id) ? "0 0 0 2px #1f7a5c33 inset" : "0 4px 14px rgba(67,44,7,0.08)"
+                  }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 8 }}>
+                    <div style={{ fontSize: 30 }}>{puzzle.icon}</div>
+                    <div style={{ borderRadius: 8, padding: "3px 8px", fontSize: 11, letterSpacing: 1.2, fontFamily: "'Bebas Neue', sans-serif", color: PUZZLE_DIFFICULTY_COLORS[puzzle.difficulty], background: `${PUZZLE_DIFFICULTY_COLORS[puzzle.difficulty]}1A`, border: `1px solid ${PUZZLE_DIFFICULTY_COLORS[puzzle.difficulty]}55` }}>
+                      {puzzle.difficulty}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 16, color: C.text, marginBottom: 3 }}>{puzzle.title}</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>{puzzle.subtitle}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: C.faint }}>{puzzle.lines.length} lines</span>
+                    <span style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, color: C.gold }}>🪙 {puzzle.chips}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {puzzleAllCompleted && (
+              <div style={{ marginTop: 18, borderRadius: 14, padding: "14px 16px", textAlign: "center", background: "rgba(31,122,92,0.08)", border: "1px solid rgba(31,122,92,0.3)", color: "#1f7a5c", fontWeight: 700 }}>
+                🏆 All puzzle tables cleared.
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 22 }}>
+              <button className="casino-btn" onClick={() => setScreen("intro")} style={{ background: "rgba(255,255,255,0.75)", color: C.text, border: `1.5px solid ${C.border}`, padding: "11px 22px", borderRadius: 10, fontSize: 15 }}>
+                ← Back to Main Menu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── PUZZLE GAME ──────────────────────────────────────────────────── */}
+      {screen === "puzzleGame" && puzzleSelected && (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "44px 16px 32px", animation: "fadeUp 0.3s ease" }}>
+          <div style={{ width: "100%", maxWidth: 760, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              <button
+                className="casino-btn"
+                onClick={() => { clearTimeout(puzzleTimer.current); setScreen("puzzleLobby"); }}
+                style={{ background: "rgba(255,255,255,0.8)", color: C.text, border: `1.5px solid ${C.border}`, padding: "8px 14px", borderRadius: 9, fontSize: 15 }}>
+                ← Lobby
+              </button>
+
+              <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1, textTransform: "uppercase" }}>Chips</div>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: C.gold }}>{puzzleChips.toLocaleString()}</div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1, textTransform: "uppercase" }}>Tries</div>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: C.text }}>{puzzleAttempts}</div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1, textTransform: "uppercase" }}>Time</div>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: puzzleTimeLeft <= 15 ? C.red : puzzleTimeLeft <= 30 ? C.gold : "#1f7a5c" }}>{puzzleTimeLeft}s</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ width: "100%", height: 6, background: "#eadfc8", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(puzzleTimeLeft / Math.max(puzzleTimerMax, 1)) * 100}%`, background: `linear-gradient(90deg, ${puzzleTimeLeft > 30 ? "#1f7a5c" : puzzleTimeLeft > 15 ? "#8a6400" : "#b02f4b"}, #d2a426)`, transition: "width 1s linear" }} />
+            </div>
+          </div>
+
+          <div className="felt-table" style={{ borderRadius: 18, padding: "24px 20px", width: "100%", maxWidth: 760 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+              <div style={{ fontSize: 34 }}>{puzzleSelected.icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 2 }}>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 21, color: C.text }}>{puzzleSelected.title}</div>
+                  <span style={{ borderRadius: 8, padding: "2px 8px", fontSize: 11, letterSpacing: 1.2, fontFamily: "'Bebas Neue', sans-serif", color: PUZZLE_DIFFICULTY_COLORS[puzzleSelected.difficulty], background: `${PUZZLE_DIFFICULTY_COLORS[puzzleSelected.difficulty]}1A`, border: `1px solid ${PUZZLE_DIFFICULTY_COLORS[puzzleSelected.difficulty]}55` }}>{puzzleSelected.difficulty}</span>
+                </div>
+                <div style={{ fontSize: 13, color: C.muted }}>{puzzleSelected.subtitle}</div>
+              </div>
+            </div>
+
+            <GoldDivider />
+
+            <div style={{ fontSize: 13, color: C.muted, textAlign: "center", marginBottom: 14 }}>Drag the code lines into the correct order.</div>
+
+            {puzzleShowHint && (
+              <div style={{ borderRadius: 10, padding: "10px 12px", marginBottom: 12, background: "rgba(13,95,128,0.08)", border: "1px solid rgba(13,95,128,0.25)", color: "#0d5f80", fontSize: 13 }}>
+                💡 {puzzleSelected.hint}
+              </div>
+            )}
+
+            <div>
+              {puzzleLines.map((line, index) => {
+                const isCorrectPos = puzzleShowResult && line.id === puzzleSelected.lines[index].id;
+                let bg = "rgba(255,255,255,0.7)";
+                let border = "1px solid rgba(138,100,0,0.25)";
+                if (puzzleDragFrom === index) {
+                  bg = "rgba(255,215,0,0.12)";
+                  border = "1px solid rgba(138,100,0,0.55)";
+                }
+                if (puzzleDragOver === index && puzzleDragFrom !== index) {
+                  bg = `${line.color}14`;
+                  border = `1px solid ${line.color}66`;
+                }
+                if (puzzleShowResult && isCorrectPos) {
+                  bg = "rgba(31,122,92,0.1)";
+                  border = "1px solid rgba(31,122,92,0.55)";
+                }
+                if (puzzleShowResult && !isCorrectPos) {
+                  bg = "rgba(176,47,75,0.08)";
+                  border = "1px solid rgba(176,47,75,0.45)";
+                }
+
+                return (
+                  <div
+                    key={line.id}
+                    draggable={!puzzleSolved}
+                    onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setPuzzleDragFrom(index); }}
+                    onDragOver={(e) => { e.preventDefault(); setPuzzleDragOver(index); }}
+                    onDrop={(e) => { e.preventDefault(); handlePuzzleDrop(index); }}
+                    style={{
+                      border,
+                      background: bg,
+                      borderRadius: 10,
+                      padding: "10px 12px",
+                      marginBottom: 7,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      cursor: puzzleSolved ? "default" : (puzzleDragFrom === index ? "grabbing" : "grab"),
+                      transition: "all 0.15s"
+                    }}>
+                    <div style={{ minWidth: 26, height: 26, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Bebas Neue', sans-serif", fontSize: 13, color: line.color, background: `${line.color}22`, border: `1px solid ${line.color}33` }}>
+                      {index + 1}
+                    </div>
+                    <code style={{ fontFamily: "'JetBrains Mono','Fira Code',monospace", fontSize: "clamp(12px,1.8vw,14px)", color: line.color, whiteSpace: "pre", flex: 1 }}>{line.code}</code>
+                    {puzzleShowResult && <div style={{ fontSize: 16 }}>{isCorrectPos ? "✓" : "✗"}</div>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <GoldDivider />
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button className="casino-btn" onClick={handlePuzzleShuffle} disabled={puzzleSolved} style={{ background: "rgba(255,255,255,0.75)", color: C.text, border: `1px solid ${C.border}`, padding: "10px 16px", borderRadius: 10, fontSize: 15 }}>
+                🔀 Shuffle (−10)
+              </button>
+              <button className="casino-btn" onClick={handlePuzzleHint} disabled={puzzleHintUsed || puzzleSolved} style={{ background: puzzleHintUsed ? "rgba(255,255,255,0.65)" : "rgba(13,95,128,0.08)", color: puzzleHintUsed ? C.faint : "#0d5f80", border: puzzleHintUsed ? `1px solid ${C.border}` : "1px solid rgba(13,95,128,0.35)", padding: "10px 16px", borderRadius: 10, fontSize: 15 }}>
+                {puzzleHintUsed ? "💡 Used" : "💡 Hint (−50)"}
+              </button>
+              <button className="casino-btn" onClick={() => handlePuzzleCheck(false)} disabled={puzzleSolved} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", padding: "10px 24px", borderRadius: 10, fontSize: 16, boxShadow: "0 4px 20px #ffd70044" }}>
+                ✓ Check Hand
+              </button>
+            </div>
+
+            {puzzleShowResult && !puzzleSolved && (
+              <div style={{ textAlign: "center", marginTop: 12, fontSize: 13, color: C.red }}>
+                Not quite right — try again.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── PUZZLE RESULT ────────────────────────────────────────────────── */}
+      {screen === "puzzleResult" && puzzleSelected && puzzleLastWin && (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "30px 20px", animation: "fadeUp 0.35s ease" }}>
+          <div className="felt-table" style={{ borderRadius: 22, padding: "34px 30px", maxWidth: 520, width: "100%", textAlign: "center" }}>
+            {puzzleLastWin.timedOut ? (
+              <>
+                <div style={{ fontSize: 56, marginBottom: 8 }}>⏰</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 44, color: C.red, letterSpacing: 3 }}>Time's Up</div>
+                <p style={{ color: C.muted, margin: "6px 0 16px" }}>The puzzle timer ended for {puzzleSelected.title}.</p>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, color: C.red, marginBottom: 16 }}>{puzzleLastWin.earned} chips</div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 58, marginBottom: 8 }}>🎉</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 44, color: C.gold, letterSpacing: 3 }}>Winner</div>
+                <p style={{ color: C.muted, margin: "6px 0 16px" }}>You solved {puzzleSelected.title}.</p>
+                <div style={{ margin: "8px 0 18px", borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, padding: "8px 0" }}>
+                  {[
+                    ["Base", `+${puzzleSelected.chips}`, C.gold],
+                    puzzleLastWin.timeBonus > 0 && ["Speed", `+${puzzleLastWin.timeBonus}`, "#1f7a5c"],
+                    puzzleLastWin.perfectBonus > 0 && ["Perfect", `+${puzzleLastWin.perfectBonus}`, "#0d5f80"],
+                    puzzleLastWin.streakBonus > 0 && ["Streak", `+${puzzleLastWin.streakBonus}`, "#a35000"],
+                    puzzleLastWin.hintPenalty > 0 && ["Hint", `-${puzzleLastWin.hintPenalty}`, C.red],
+                  ].filter(Boolean).map(([label, amount, color]) => (
+                    <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: C.muted, padding: "4px 0" }}>
+                      <span>{label}</span><span style={{ color, fontWeight: 700 }}>{amount}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, color: C.gold, marginBottom: 16 }}>+{puzzleLastWin.earned} chips</div>
+              </>
+            )}
+
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, color: C.muted, letterSpacing: 1, marginBottom: 14 }}>
+              Balance: <span style={{ color: C.gold }}>{puzzleChips.toLocaleString()}</span>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button className="casino-btn" onClick={() => setScreen("puzzleLobby")} style={{ background: "rgba(255,255,255,0.8)", color: C.text, border: `1px solid ${C.border}`, padding: "10px 18px", borderRadius: 10, fontSize: 15 }}>
+                ← Lobby
+              </button>
+              <button className="casino-btn" onClick={() => startPuzzle(puzzleSelected)} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", padding: "10px 22px", borderRadius: 10, fontSize: 16, boxShadow: "0 4px 20px #ffd70044" }}>
+                🎲 Play Again
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -803,7 +1309,7 @@ export default function App() {
             <div style={{ fontSize: 60, marginBottom: 12, animation: "cardFloat 3s ease-in-out infinite" }}>🎭</div>
             <div style={{
               fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, letterSpacing: 3,
-              color: C.gold, textShadow: "0 0 20px #ffd70088",
+              color: C.gold,
               marginBottom: 6
             }}>Who's at the Table?</div>
             <p style={{ color: C.muted, margin: "0 0 30px", fontSize: 14, letterSpacing: 0.5 }}>
@@ -889,7 +1395,7 @@ export default function App() {
                 <div style={{ width: 1, height: 30, background: C.border }} />
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 10, color: C.faint, letterSpacing: 1, textTransform: "uppercase" }}>Chips</div>
-                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: C.gold, textShadow: "0 0 10px #ffd70088", letterSpacing: 1 }}>{score}</div>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, color: C.gold, letterSpacing: 1 }}>{score}</div>
                 </div>
                 <div style={{ width: 1, height: 30, background: C.border }} />
                 <div style={{ textAlign: "center" }}>
@@ -1069,7 +1575,7 @@ export default function App() {
             <div style={{ fontSize: 12, color: level.color, fontFamily: "'Bebas Neue', sans-serif", letterSpacing: 3, marginBottom: 8, textShadow: `0 0 10px ${level.color}` }}>
               ZONE CLEARED ✓
             </div>
-            <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, fontWeight: 900, margin: "0 0 4px", color: C.gold, textShadow: "0 0 20px #ffd70066" }}>{level.name}</h2>
+            <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, fontWeight: 900, margin: "0 0 4px", color: C.gold }}>{level.name}</h2>
             <p style={{ color: C.muted, margin: "0 0 28px", fontSize: 15 }}>{level.subtitle}</p>
 
             <GoldDivider />
@@ -1128,7 +1634,7 @@ export default function App() {
             <GoldDivider />
 
             <div style={{ margin: "20px 0 32px" }}>
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 64, color: C.gold, textShadow: "0 0 30px #ffd70099", letterSpacing: 2 }}>{score}</div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 64, color: C.gold, letterSpacing: 2 }}>{score}</div>
               <div style={{ fontSize: 12, color: C.faint, letterSpacing: 2, textTransform: "uppercase" }}>Final Chips</div>
             </div>
 
@@ -1159,11 +1665,11 @@ export default function App() {
               fontSize: "clamp(36px, 8vw, 60px)", letterSpacing: 4,
               background: "linear-gradient(180deg, #fff8e1, #ffd700, #ff8c00)",
               WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-              filter: "drop-shadow(0 0 20px #ffd70066)",
+              filter: "drop-shadow(0 1px 0 rgba(255,255,255,0.45))",
               margin: "0 0 8px"
             }}>Angular Mastered!</div>
             <p style={{ color: C.muted, margin: "0 0 28px", fontSize: 16 }}>
-              Well played, <span style={{ color: C.gold, textShadow: "0 0 10px #ffd70088", fontFamily: "'Playfair Display', serif", fontWeight: 700 }}>{playerName}</span>! All 6 zones conquered.
+              Well played, <span style={{ color: C.gold, fontFamily: "'Playfair Display', serif", fontWeight: 700 }}>{playerName}</span>! All 6 zones conquered.
             </p>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 28 }}>
@@ -1184,7 +1690,7 @@ export default function App() {
 
             <div style={{ display: "flex", justifyContent: "center", gap: 48, margin: "20px 0 32px" }}>
               <div>
-                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 52, color: C.gold, textShadow: "0 0 25px #ffd700aa", letterSpacing: 2 }}>{score}</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 52, color: C.gold, letterSpacing: 2 }}>{score}</div>
                 <div style={{ fontSize: 11, color: C.faint, letterSpacing: 1, textTransform: "uppercase" }}>Final Chips</div>
               </div>
               <div>
@@ -1216,7 +1722,7 @@ export default function App() {
           <div className="felt-table" style={{ borderRadius: 28, padding: "44px 36px", maxWidth: 540, width: "100%", animation: "marqueeGlow 3s ease-in-out infinite" }}>
             <div style={{ textAlign: "center", marginBottom: 28 }}>
               <div style={{ fontSize: 52, marginBottom: 8, animation: "cardFloat 3s ease-in-out infinite", filter: "drop-shadow(0 0 20px #ffd700)" }}>🏆</div>
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 42, letterSpacing: 4, color: C.gold, textShadow: "0 0 20px #ffd70088" }}>Hall of Fame</div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 42, letterSpacing: 4, color: C.gold }}>Hall of Fame</div>
               <p style={{ color: C.muted, margin: "4px 0 0", fontSize: 14, letterSpacing: 1, textTransform: "uppercase" }}>Top Angular Quest Players</p>
             </div>
 
@@ -1295,7 +1801,7 @@ export default function App() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 24, animation: "fadeUp 0.4s ease" }}>
           <div className="felt-table" style={{ borderRadius: 24, padding: "36px 32px", maxWidth: 430, width: "100%", textAlign: "center" }}>
             <div style={{ fontSize: 52, marginBottom: 10 }}>🔐</div>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 36, letterSpacing: 3, color: C.gold, textShadow: "0 0 15px #ffd70088" }}>VIP Access</div>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 36, letterSpacing: 3, color: C.gold }}>VIP Access</div>
             <p style={{ color: C.muted, margin: "0 0 24px", fontSize: 14, letterSpacing: 0.5 }}>Enter admin PIN to open the backroom</p>
             <input
               autoFocus
@@ -1330,7 +1836,7 @@ export default function App() {
           <div className="felt-table" style={{ borderRadius: 24, padding: "34px 30px", maxWidth: 780, width: "100%" }}>
             <div style={{ textAlign: "center", marginBottom: 20 }}>
               <div style={{ fontSize: 44, marginBottom: 6 }}>🎰</div>
-              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, letterSpacing: 3, color: C.gold, textShadow: "0 0 20px #ffd70088" }}>The Backroom</div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, letterSpacing: 3, color: C.gold }}>The Backroom</div>
               <p style={{ margin: 0, color: C.muted, fontSize: 14, letterSpacing: 0.5 }}>Admin Dashboard — manage game content and monitor progress</p>
             </div>
 
