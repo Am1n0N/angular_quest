@@ -8,8 +8,9 @@ const TOTAL_LIVES = 3;
 const QUESTION_TIME_LIMIT = 12;
 const RACE_DISTANCE = 1200;
 const RACE_QUESTION_TIME_LIMIT = 9;
-const RACE_BASE_PLAYER_SPEED = 46;
-const RACE_BASE_CPU_SPEED = 44;
+const RACE_BASE_CPU_SPEED = 40;
+const RACE_INITIAL_SPEED_GAP = 0;
+const RACE_BASE_PLAYER_SPEED = RACE_BASE_CPU_SPEED + RACE_INITIAL_SPEED_GAP;
 const RACE_MIN_SPEED = 28;
 const RACE_MAX_SPEED = 74;
 const BONUS_LIFE_STREAK = 5;
@@ -822,6 +823,7 @@ export default function App() {
   const [raceStartTs, setRaceStartTs] = useState(0);
   const [raceFinalScore, setRaceFinalScore] = useState(0);
   const [raceLeaderboardSaved, setRaceLeaderboardSaved] = useState(false);
+  const [raceEndReason, setRaceEndReason] = useState("finish");
   const [dailyClaimDate, setDailyClaimDate] = useState("");
   const importFileRef = useRef(null);
   const timer = useRef(null);
@@ -1136,6 +1138,7 @@ export default function App() {
     setRaceWrongCount(0);
     setRaceFinalScore(0);
     setRaceLeaderboardSaved(false);
+    setRaceEndReason("finish");
     setRaceStartTs(Date.now());
     setScreen("raceGame");
   }, [levels, playerName]);
@@ -1150,16 +1153,18 @@ export default function App() {
 
     if (correct) {
       setRaceCorrectCount(c => c + 1);
-      setRaceFeedbackLabel("Boost engaged!");
-      setRacePlayerSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 14));
-      setRaceCpuSpeed(speed => Math.max(RACE_MIN_SPEED, speed - 4));
+      setRaceFeedbackLabel("Bonne réponse : +10 vitesse joueur");
+      setRacePlayerSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 10));
       setRaceBoostPulse(v => v + 1);
       if (soundEnabled) playTone(930, 0.08, "triangle", 0.03);
+    } else if (timedOut) {
+      setRaceWrongCount(c => c + 1);
+      setRaceFeedbackLabel("Temps écoulé : question passée (pas de pénalité vitesse)");
+      if (soundEnabled) playTone(380, 0.06, "square", 0.018);
     } else {
       setRaceWrongCount(c => c + 1);
-      setRaceFeedbackLabel(timedOut ? "Time up - traction lost!" : "Wrong answer - speed down!");
-      setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - 11));
-      setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 6));
+      setRaceFeedbackLabel("Mauvaise réponse : -10 vitesse joueur");
+      setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - 10));
       setRaceSlowPulse(v => v + 1);
       if (soundEnabled) playTone(260, 0.1, "sawtooth", 0.025);
     }
@@ -1200,19 +1205,6 @@ export default function App() {
   useEffect(() => {
     if (screen !== "raceGame" || raceResult) return undefined;
     const id = setInterval(() => {
-      setRacePlayerSpeed(curr => {
-        const next = Math.max(RACE_MIN_SPEED, Math.min(RACE_MAX_SPEED, curr + (RACE_BASE_PLAYER_SPEED - curr) * 0.1));
-        racePlayerSpeedRef.current = next;
-        return next;
-      });
-
-      setRaceCpuSpeed(curr => {
-        const target = RACE_BASE_CPU_SPEED + (Math.random() * 3 - 1.5);
-        const next = Math.max(RACE_MIN_SPEED, Math.min(RACE_MAX_SPEED, curr + (target - curr) * 0.14));
-        raceCpuSpeedRef.current = next;
-        return next;
-      });
-
       setRacePlayerDistance(distance => Math.min(RACE_DISTANCE, distance + racePlayerSpeedRef.current * 0.08));
       setRaceCpuDistance(distance => Math.min(RACE_DISTANCE, distance + raceCpuSpeedRef.current * 0.08));
     }, 80);
@@ -1234,6 +1226,7 @@ export default function App() {
     const finalScore = Math.max(50, placementBonus + paceBonus + answerScore + distanceScore);
 
     setRaceResult(playerWon ? "win" : "lose");
+  setRaceEndReason("finish");
     setRaceFinalScore(finalScore);
 
     if (!raceLeaderboardSaved) {
@@ -2754,10 +2747,14 @@ export default function App() {
           <div className="felt-table" style={{ borderRadius: 24, padding: "34px 30px", maxWidth: 520, width: "100%", textAlign: "center" }}>
             <div style={{ fontSize: 64, marginBottom: 8 }}>{raceResult === "win" ? "🏁" : "💨"}</div>
             <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 46, letterSpacing: 3, color: raceResult === "win" ? C.gold : C.red }}>
-              {raceResult === "win" ? "Finish Line!" : "Race Lost"}
+              {raceResult === "win" ? "You Won" : "You Lost"}
             </div>
             <p style={{ color: C.muted, margin: "4px 0 16px", fontSize: 14 }}>
-              {raceResult === "win" ? "You outran the CPU with smart Angular answers." : "CPU reached the finish first. Refuel and retry."}
+              {raceResult === "win"
+                ? "You won the race. You outran the CPU with smart Angular answers."
+                : raceEndReason === "speed-drop"
+                  ? "You lost the race: your speed became equal to or lower than CPU speed."
+                  : "You lost the race: CPU reached the finish first. Refuel and retry."}
             </p>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 16 }}>

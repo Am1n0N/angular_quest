@@ -5,11 +5,12 @@ Interactive Angular quiz game built with React + Vite.
 ## 3D race mode
 
 - Racing mode now uses Three.js via React Three Fiber for real-time 3D rendering.
-- Vehicle model source (online asset): Cesium Milk Truck (glTF sample).
+- Vehicle model sources (online assets): Buggy + ToyCar (glTF sample models).
 - Model license: CC BY 4.0.
 - Trademark note: Cesium trademark terms apply per model README.
 - Asset reference:
-	- https://github.com/KhronosGroup/glTF-Sample-Models/tree/main/2.0/CesiumMilkTruck
+	- https://github.com/KhronosGroup/glTF-Sample-Models/tree/main/2.0/Buggy
+	- https://github.com/KhronosGroup/glTF-Sample-Models/tree/main/2.0/ToyCar
 
 ## Data persistence
 
