@@ -13,7 +13,7 @@ async function getRedisClient() {
     if (!redisClientPromise) {
         redisClientPromise = (async () => {
             const client = createClient({ url: redisUrl });
-            client.on("error", () => {});
+            client.on("error", () => { });
             await client.connect();
             return client;
         })();
