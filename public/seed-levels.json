@@ -1,0 +1,398 @@
+[
+  {
+    "id": 1,
+    "name": "COMPONENTS",
+    "subtitle": "Building Blocks",
+    "color": "#e63950",
+    "light": "#fff0f2",
+    "icon": "◈",
+    "description": "Components are self-contained units of UI — a template, styles, and logic bundled together.",
+    "questions": [
+      {
+        "q": "What decorator marks a class as an Angular component?",
+        "options": [
+          "@NgModule",
+          "@Component",
+          "@Injectable",
+          "@Directive"
+        ],
+        "answer": 1,
+        "explanation": "@Component provides metadata (template, styles, selector) so Angular can render the class."
+      },
+      {
+        "q": "Which property defines an inline HTML template in @Component?",
+        "options": [
+          "templateUrl",
+          "html",
+          "template",
+          "view"
+        ],
+        "answer": 2,
+        "explanation": "'template' holds the inline HTML string. Use 'templateUrl' to reference an external file."
+      },
+      {
+        "q": "What is the 'selector' used for?",
+        "options": [
+          "Picking CSS styles",
+          "Naming the module",
+          "Embedding the component in HTML",
+          "Route config"
+        ],
+        "answer": 2,
+        "explanation": "The selector (e.g. 'app-root') is the custom HTML tag used to place the component."
+      },
+      {
+        "q": "Which lifecycle hook runs once after inputs are first set?",
+        "options": [
+          "ngOnDestroy",
+          "ngOnChanges",
+          "ngDoCheck",
+          "ngOnInit"
+        ],
+        "answer": 3,
+        "explanation": "ngOnInit fires once after the first ngOnChanges — perfect for initialization logic."
+      },
+      {
+        "q": "Angular two-way binding syntax is called:",
+        "options": [
+          "[value]",
+          "{{ngModel}}",
+          "[(ngModel)]",
+          "(change)"
+        ],
+        "answer": 2,
+        "explanation": "[(ngModel)] — 'banana in a box' — combines property binding [] and event binding ()."
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "DIRECTIVES",
+    "subtitle": "DOM Manipulation",
+    "color": "#e07b00",
+    "light": "#fff8ee",
+    "icon": "⬡",
+    "description": "Directives extend HTML. Structural directives reshape the DOM; attribute directives change appearance.",
+    "questions": [
+      {
+        "q": "Which structural directive conditionally shows an element?",
+        "options": [
+          "*ngFor",
+          "[ngClass]",
+          "*ngIf",
+          "*ngSwitch"
+        ],
+        "answer": 2,
+        "explanation": "*ngIf adds or removes an element from the DOM based on a truthy expression."
+      },
+      {
+        "q": "*ngFor is used to:",
+        "options": [
+          "Apply CSS classes",
+          "Handle clicks",
+          "Iterate over a list",
+          "Import modules"
+        ],
+        "answer": 2,
+        "explanation": "*ngFor loops over a collection and stamps out a template for each item."
+      },
+      {
+        "q": "Which directive dynamically applies CSS classes?",
+        "options": [
+          "*ngClass",
+          "(ngClass)",
+          "[ngClass]",
+          "@Class"
+        ],
+        "answer": 2,
+        "explanation": "[ngClass] is an attribute directive binding an object of class names to true/false values."
+      },
+      {
+        "q": "Structural directives use which prefix in templates?",
+        "options": [
+          "@",
+          "#",
+          "&",
+          "*"
+        ],
+        "answer": 3,
+        "explanation": "The asterisk (*) is syntactic sugar for Angular's <ng-template> desugaring mechanism."
+      },
+      {
+        "q": "Which directive sets inline styles dynamically?",
+        "options": [
+          "*ngStyle",
+          "(style)",
+          "@Style",
+          "[ngStyle]"
+        ],
+        "answer": 3,
+        "explanation": "[ngStyle] lets you bind an object of CSS properties directly to an element."
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "SERVICES & DI",
+    "subtitle": "Injection Protocol",
+    "color": "#1a9e5c",
+    "light": "#edfaf3",
+    "icon": "⬢",
+    "description": "Services hold shared logic. Angular's Dependency Injection system provides them wherever needed.",
+    "questions": [
+      {
+        "q": "What decorator makes a class injectable?",
+        "options": [
+          "@Service",
+          "@Component",
+          "@Provide",
+          "@Injectable"
+        ],
+        "answer": 3,
+        "explanation": "@Injectable marks the class so Angular's DI system can instantiate and inject it."
+      },
+      {
+        "q": "What does providedIn: 'root' mean?",
+        "options": [
+          "Only in root component",
+          "Registered in root module only",
+          "App-wide singleton",
+          "Injected into HTML root"
+        ],
+        "answer": 2,
+        "explanation": "providedIn: 'root' registers the service in the root injector — one shared instance for the whole app."
+      },
+      {
+        "q": "How do you inject a service into a component?",
+        "options": [
+          "Import with require()",
+          "Call new Service()",
+          "Constructor parameter",
+          "@Inject on the template"
+        ],
+        "answer": 2,
+        "explanation": "Declare the service as a typed constructor parameter and Angular's DI injects it automatically."
+      },
+      {
+        "q": "HttpClient comes from which module?",
+        "options": [
+          "FormsModule",
+          "BrowserModule",
+          "RouterModule",
+          "HttpClientModule"
+        ],
+        "answer": 3,
+        "explanation": "HttpClientModule (or provideHttpClient()) provides the HttpClient service."
+      },
+      {
+        "q": "RxJS Observables are ideal for:",
+        "options": [
+          "Defining component inputs",
+          "Rendering templates faster",
+          "Async streams of data",
+          "Importing modules lazily"
+        ],
+        "answer": 2,
+        "explanation": "Observables represent async streams — perfect for HTTP calls, user events, and state changes."
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "name": "PIPES",
+    "subtitle": "Transform the Stream",
+    "color": "#0070e0",
+    "light": "#eef5ff",
+    "icon": "⬟",
+    "description": "Pipes transform display values in templates — format dates, currencies, strings and more.",
+    "questions": [
+      {
+        "q": "How do you apply a pipe in a template?",
+        "options": [
+          "pipe(value)",
+          "@Pipe(value)",
+          "value | pipeName",
+          "{{pipe: value}}"
+        ],
+        "answer": 2,
+        "explanation": "The pipe operator | chains transformations: {{ birthday | date:'short' }}"
+      },
+      {
+        "q": "Which built-in pipe formats a number as currency?",
+        "options": [
+          "money",
+          "decimal",
+          "number",
+          "currency"
+        ],
+        "answer": 3,
+        "explanation": "The currency pipe formats: {{ price | currency:'USD' }} → $1,234.00"
+      },
+      {
+        "q": "A 'pure' pipe only re-runs when:",
+        "options": [
+          "Any change detection runs",
+          "The page reloads",
+          "Input reference/value changes",
+          "It has no side effects"
+        ],
+        "answer": 2,
+        "explanation": "Pure pipes (default) re-run only on reference changes — much better for performance."
+      },
+      {
+        "q": "Which pipe converts a string to uppercase?",
+        "options": [
+          "caps",
+          "toUpper",
+          "upper",
+          "uppercase"
+        ],
+        "answer": 3,
+        "explanation": "{{ 'hello' | uppercase }} → 'HELLO'. There's also the lowercase pipe."
+      },
+      {
+        "q": "What decorator creates a custom pipe?",
+        "options": [
+          "@Component",
+          "@Transform",
+          "@Filter",
+          "@Pipe"
+        ],
+        "answer": 3,
+        "explanation": "@Pipe({ name: 'myPipe' }) marks a class as a pipe. Implement the transform() method."
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "ROUTING",
+    "subtitle": "Navigate the Matrix",
+    "color": "#7b3fe4",
+    "light": "#f5f0ff",
+    "icon": "◉",
+    "description": "Angular Router maps URLs to components, enabling single-page navigation with deep linking.",
+    "questions": [
+      {
+        "q": "Which directive renders the matched route's component?",
+        "options": [
+          "<ng-view>",
+          "<route-view>",
+          "<router-link>",
+          "<router-outlet>"
+        ],
+        "answer": 3,
+        "explanation": "<router-outlet> is the placeholder where the routed component is inserted."
+      },
+      {
+        "q": "How do you navigate programmatically?",
+        "options": [
+          "window.location.href",
+          "this.go('/path')",
+          "router.navigate()",
+          "RouterLink.navigate()"
+        ],
+        "answer": 2,
+        "explanation": "Inject Router and call this.router.navigate(['/path']) for imperative navigation."
+      },
+      {
+        "q": "A route guard is used for:",
+        "options": [
+          "Protecting CSS styles",
+          "Caching route data",
+          "Controlling route access",
+          "Pre-loading images"
+        ],
+        "answer": 2,
+        "explanation": "Guards like CanActivate control whether a user can enter or leave a route."
+      },
+      {
+        "q": "How do you define a route parameter?",
+        "options": [
+          "{id}",
+          "@id",
+          "$id",
+          ":id"
+        ],
+        "answer": 3,
+        "explanation": "{ path: 'user/:id' } — access the value via ActivatedRoute.params or snapshot.params."
+      },
+      {
+        "q": "Lazy loading improves apps by:",
+        "options": [
+          "Caching all routes at start",
+          "Splitting into on-demand chunks",
+          "Removing unused CSS",
+          "Pre-rendering HTML"
+        ],
+        "answer": 1,
+        "explanation": "loadChildren splits modules into separate bundles that only download when the route is visited."
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "name": "FORMS",
+    "subtitle": "Reactive Power",
+    "color": "#c0392b",
+    "light": "#fff2f0",
+    "icon": "◆",
+    "description": "Angular offers Template-driven and Reactive forms — both provide validation, state, and value access.",
+    "questions": [
+      {
+        "q": "The two Angular form approaches are:",
+        "options": [
+          "Static & Dynamic",
+          "HTML & JSON",
+          "Model & View",
+          "Template-driven & Reactive"
+        ],
+        "answer": 3,
+        "explanation": "Template-driven uses directives in templates; Reactive uses FormGroup/FormControl in the component class."
+      },
+      {
+        "q": "Which class represents a single form field in Reactive Forms?",
+        "options": [
+          "FormField",
+          "FormInput",
+          "FormValue",
+          "FormControl"
+        ],
+        "answer": 3,
+        "explanation": "FormControl tracks the value and validation state of a single input element."
+      },
+      {
+        "q": "Which module must be imported for Reactive Forms?",
+        "options": [
+          "FormsModule",
+          "FormModule",
+          "InputModule",
+          "ReactiveFormsModule"
+        ],
+        "answer": 3,
+        "explanation": "ReactiveFormsModule provides FormGroup, FormControl, FormArray and related directives."
+      },
+      {
+        "q": "How do you mark a field as required in Reactive Forms?",
+        "options": [
+          "required: true",
+          "@Required",
+          "FormRequired()",
+          "Validators.required"
+        ],
+        "answer": 3,
+        "explanation": "new FormControl('', Validators.required) — Validators is a utility class with common validators."
+      },
+      {
+        "q": "Which property is true when validators fail?",
+        "options": [
+          "control.bad",
+          "control.failed",
+          "control.error",
+          "control.invalid"
+        ],
+        "answer": 3,
+        "explanation": "control.invalid is true when validators fail. Pair with control.touched to show error messages."
+      }
+    ]
+  }
+]

@@ -1,0 +1,9 @@
+<svg width="320" height="92" viewBox="0 0 320 92" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="320" height="92" rx="10" fill="white"/>
+  <path d="M42 16C30 16 20 25 20 37C20 49 30 58 42 58H56V48H42C35.9 48 31 43.1 31 37C31 30.9 35.9 26 42 26H58L70 16H42Z" fill="#2A5B9E"/>
+  <path d="M66 16L54 26H69C75.1 26 80 30.9 80 37C80 43.1 75.1 48 69 48H54L42 58H69C81 58 91 49 91 37C91 25 81 16 69 16H66Z" fill="#2A5B9E"/>
+  <path d="M61 58H47L35 76H49L61 58Z" fill="#E5A10A"/>
+  <path d="M78 58H64L52 76H66L78 58Z" fill="#E5A10A"/>
+  <text x="106" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="40" font-weight="700" fill="#E5A10A">ARAB</text>
+  <text x="216" y="58" font-family="Segoe UI, Arial, sans-serif" font-size="40" font-weight="700" fill="#2A5B9E">SOFT</text>
+</svg>
