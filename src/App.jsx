@@ -13,6 +13,7 @@ const SQLITE_IDB_KEY = "main";
 const LEADERBOARD_CACHE_KEY = "aq_lb_v2";
 const USER_PROGRESS_KEY = "aq_user_progress_v1";
 const SHARED_LEADERBOARD_API = "/api/leaderboard";
+const ADMIN_PIN = import.meta.env.VITE_ADMIN_PIN || "";
 const COMPANY_NAME = "ARAB SOFT";
 const COMPANY_LOGO_SRC = "/company-logo.svg";
 
@@ -127,7 +128,14 @@ async function sqliteSetJson(key, value) {
 async function fetchSharedLeaderboard() {
   const response = await fetch(SHARED_LEADERBOARD_API, { method: "GET" });
   if (!response.ok) {
-    throw new Error("Unable to fetch leaderboard");
+    let message = "Unable to fetch leaderboard";
+    try {
+      const payload = await response.json();
+      if (payload?.detail) {
+        message = payload.detail;
+      }
+    } catch (_) {}
+    throw new Error(message);
   }
   const payload = await response.json();
   if (!Array.isArray(payload?.leaderboard)) {
@@ -146,7 +154,14 @@ async function pushSharedLeaderboardEntry(entry) {
   });
 
   if (!response.ok) {
-    throw new Error("Unable to update leaderboard");
+    let message = "Unable to update leaderboard";
+    try {
+      const payload = await response.json();
+      if (payload?.detail) {
+        message = payload.detail;
+      }
+    } catch (_) {}
+    throw new Error(message);
   }
 
   const payload = await response.json();
@@ -411,6 +426,7 @@ export default function App() {
   const [nameInput, setNameInput] = useState("");
   const [levels, setLevels] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [leaderboardError, setLeaderboardError] = useState("");
   const [levelIdx, setLevelIdx] = useState(0);
   const [qIdx, setQIdx] = useState(0);
   const [lives, setLives] = useState(TOTAL_LIVES);
@@ -422,6 +438,8 @@ export default function App() {
   const [shake, setShake] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [adminNotice, setAdminNotice] = useState("");
+  const [adminPinInput, setAdminPinInput] = useState("");
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [userProgress, setUserProgress] = useState(null);
   const importFileRef = useRef(null);
   const timer = useRef(null);
@@ -469,15 +487,15 @@ export default function App() {
         const remoteLeaderboard = await fetchSharedLeaderboard();
         if (isMounted) {
           setLeaderboard(remoteLeaderboard);
+          setLeaderboardError("");
         }
         await sqliteSetJson(LEADERBOARD_CACHE_KEY, remoteLeaderboard);
-      } catch (_) {
-        try {
-          const cachedLeaderboard = await sqliteGetJson(LEADERBOARD_CACHE_KEY);
-          if (isMounted && Array.isArray(cachedLeaderboard)) {
-            setLeaderboard(cachedLeaderboard);
-          }
-        } catch (_) {}
+      } catch (error) {
+        if (isMounted) {
+          const message = error instanceof Error ? error.message : "Unable to load shared leaderboard.";
+          setLeaderboardError(message);
+          setLeaderboard([]);
+        }
       }
     })();
 
@@ -498,18 +516,14 @@ export default function App() {
       try {
         const remoteUpdated = await pushSharedLeaderboardEntry(entry);
         setLeaderboard(remoteUpdated);
+        setLeaderboardError("");
         await sqliteSetJson(LEADERBOARD_CACHE_KEY, remoteUpdated);
-      } catch (_) {
-        const localUpdated = [...leaderboard, entry]
-          .sort((a,b) => b.score - a.score)
-          .slice(0, 20);
-        setLeaderboard(localUpdated);
-        try {
-          await sqliteSetJson(LEADERBOARD_CACHE_KEY, localUpdated);
-        } catch (_) {}
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to update shared leaderboard.";
+        setLeaderboardError(message);
       }
     })();
-  }, [leaderboard]);
+  }, []);
 
   const handleAnswer = useCallback((idx) => {
     if (showFB) return;
@@ -543,7 +557,12 @@ export default function App() {
   };
 
   const goLeaderboard = (from) => { setPrevScreen(from); setScreen("leaderboard"); };
-  const goAdmin = (from) => { setPrevScreen(from); setScreen("admin"); };
+  const goAdminLogin = (from) => {
+    setPrevScreen(from);
+    setAdminNotice("");
+    setAdminPinInput("");
+    setScreen("adminLogin");
+  };
 
   const zoneCount = levels.length;
   const totalQuestionCount = levels.reduce((total, zone) => total + zone.questions.length, 0);
@@ -615,6 +634,34 @@ export default function App() {
     } finally {
       input.value = "";
     }
+  }, []);
+
+  const handleAdminLogin = useCallback(() => {
+    if (!ADMIN_PIN) {
+      setAdminNotice("Admin PIN is not configured. Set VITE_ADMIN_PIN in environment.");
+      return;
+    }
+
+    if (adminPinInput === ADMIN_PIN) {
+      setIsAdminAuthenticated(true);
+      setAdminNotice("");
+      setScreen("admin");
+      return;
+    }
+
+    setAdminNotice("Invalid admin PIN.");
+  }, [adminPinInput]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        goAdminLogin("intro");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   return (
@@ -695,18 +742,47 @@ export default function App() {
               <button onClick={() => goLeaderboard("intro")} style={{ background:C.bg,color:C.text,border:`1.5px solid ${C.border}`,padding:"15px 24px",borderRadius:14,fontSize:15,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
                 🏆 Leaderboard
               </button>
-              <button onClick={() => goAdmin("intro")} style={{ background:C.bg,color:C.text,border:`1.5px solid ${C.border}`,padding:"15px 24px",borderRadius:14,fontSize:15,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
-                🛠 Admin
-              </button>
             </div>
             {adminNotice && <div style={{ marginTop: 8, fontSize: 12, color: C.faint }}>{adminNotice}</div>}
+            {leaderboardError && <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c" }}>{leaderboardError}</div>}
             {zoneCount===0 && <div style={{ marginTop: 8, fontSize: 12, color: C.faint }}>Loading content from database…</div>}
           </div>
         </div>
       )}
 
+      {/* ─── ADMIN LOGIN ───────────────────────────────────────────────────── */}
+      {screen === "adminLogin" && (
+        <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24,animation:"fadeUp .4s ease" }}>
+          <div style={{ background:C.card,borderRadius:24,boxShadow:"0 8px 36px rgba(0,0,0,.10)",padding:"36px 32px",maxWidth:430,width:"100%",border:`1px solid ${C.border}` }}>
+            <div style={{ textAlign:"center",marginBottom:16 }}>
+              <div style={{ fontSize:44,marginBottom:8 }}>🔒</div>
+              <h2 style={{ fontSize:28,fontWeight:800,margin:"0 0 4px" }}>Admin Access</h2>
+              <p style={{ margin:0,color:C.muted,fontSize:14 }}>Enter admin PIN to open dashboard</p>
+            </div>
+
+            <input
+              autoFocus
+              value={adminPinInput}
+              onChange={(event) => setAdminPinInput(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && handleAdminLogin()}
+              placeholder="Admin PIN"
+              type="password"
+              style={{ width:"100%",padding:"13px 16px",border:`2px solid ${C.border}`,borderRadius:12,fontSize:16,fontFamily:"inherit",outline:"none",marginBottom:10,background:C.bg,color:C.text }}
+            />
+
+            <button onClick={handleAdminLogin} style={{ width:"100%",background:"linear-gradient(135deg,#e63950,#7b3fe4)",color:"#fff",border:"none",padding:"13px",borderRadius:12,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+              Open Dashboard
+            </button>
+
+            {adminNotice && <div style={{ marginTop:10, fontSize:12, color:"#b91c1c", textAlign:"center" }}>{adminNotice}</div>}
+
+            <button onClick={() => setScreen(prevScreen || "intro")} style={{ display:"block",width:"100%",marginTop:8,background:"none",border:"none",color:C.faint,cursor:"pointer",fontFamily:"inherit",fontSize:13,padding:"6px 0" }}>← Back</button>
+          </div>
+        </div>
+      )}
+
       {/* ─── ADMIN ─────────────────────────────────────────────────────────── */}
-      {screen === "admin" && (
+      {screen === "admin" && isAdminAuthenticated && (
         <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24,animation:"fadeUp .4s ease" }}>
           <div style={{ background:C.card,borderRadius:24,boxShadow:"0 8px 36px rgba(0,0,0,.10)",padding:"34px 30px",maxWidth:760,width:"100%",border:`1px solid ${C.border}` }}>
             <div style={{ textAlign:"center",marginBottom:18 }}>
@@ -755,6 +831,7 @@ export default function App() {
 
             <div style={{ display:"flex",gap:10,justifyContent:"center",marginTop:18 }}>
               <button onClick={() => setScreen(prevScreen)} style={{ background:C.bg,border:`1.5px solid ${C.border}`,color:C.text,padding:"12px 20px",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>← Back</button>
+              <button onClick={() => { setIsAdminAuthenticated(false); setScreen("intro"); }} style={{ background:C.bg,border:`1.5px solid ${C.border}`,color:C.text,padding:"12px 20px",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>🔓 Logout Admin</button>
               <button onClick={() => setScreen("namePicker")} style={{ background:"linear-gradient(135deg,#e63950,#7b3fe4)",color:"#fff",border:"none",padding:"12px 26px",borderRadius:12,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>Play Now →</button>
             </div>
           </div>
@@ -978,7 +1055,8 @@ export default function App() {
             {leaderboard.length === 0 ? (
               <div style={{ textAlign:"center",padding:"44px 0",color:C.faint }}>
                 <div style={{ fontSize:48,marginBottom:10 }}>📭</div>
-                <div style={{ fontSize:15 }}>No scores yet — be the first!</div>
+                <div style={{ fontSize:15 }}>{leaderboardError ? "Shared leaderboard unavailable" : "No scores yet — be the first!"}</div>
+                {leaderboardError && <div style={{ fontSize:12, color:"#b91c1c", marginTop:6 }}>{leaderboardError}</div>}
               </div>
             ) : (
               <div style={{ display:"flex",flexDirection:"column",gap:9 }}>

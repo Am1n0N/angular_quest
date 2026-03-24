@@ -16,6 +16,10 @@ function sanitizeEntry(entry) {
 }
 
 async function readLeaderboard() {
+    if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+        throw new Error("Leaderboard storage is not configured. Add KV_REST_API_URL and KV_REST_API_TOKEN in Vercel environment variables.");
+    }
+
     const stored = await kv.get(LEADERBOARD_KEY);
     if (!Array.isArray(stored)) {
         return [];
@@ -44,9 +48,12 @@ export default async function handler(req, res) {
 
         return res.status(405).json({ message: "Method not allowed" });
     } catch (error) {
-        return res.status(500).json({
+        const detail = error instanceof Error ? error.message : "Unknown error";
+        const isConfigurationError = detail.toLowerCase().includes("not configured") || detail.includes("KV_REST_API");
+
+        return res.status(isConfigurationError ? 503 : 500).json({
             message: "Leaderboard storage is unavailable.",
-            detail: error instanceof Error ? error.message : "Unknown error",
+            detail,
         });
     }
 }
