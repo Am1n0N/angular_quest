@@ -138,7 +138,10 @@ function openIndexedDb() {
 
 async function readDbBytes() {
   if (!window.indexedDB) return null;
-  const db = await openIndexedDb();
+                animationName: "neonPulse",
+                animationDuration: `${0.8 + i * 0.15}s`,
+                animationTimingFunction: "ease-in-out",
+                animationIterationCount: "infinite",
   return new Promise((resolve, reject) => {
     const tx = db.transaction(SQLITE_IDB_STORE, "readonly");
     const store = tx.objectStore(SQLITE_IDB_STORE);
