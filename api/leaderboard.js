@@ -3,6 +3,24 @@ import { kv } from "@vercel/kv";
 const LEADERBOARD_KEY = "aq_leaderboard_v1";
 const MAX_LEADERBOARD_ENTRIES = 20;
 
+function resolveStorageConfig() {
+    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+    if (!url || !token) {
+        throw new Error(
+            "Leaderboard storage is not configured. Set KV_REST_API_URL + KV_REST_API_TOKEN or UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN."
+        );
+    }
+
+    if (!process.env.KV_REST_API_URL) {
+        process.env.KV_REST_API_URL = url;
+    }
+    if (!process.env.KV_REST_API_TOKEN) {
+        process.env.KV_REST_API_TOKEN = token;
+    }
+}
+
 function sanitizeEntry(entry) {
     const safeName = String(entry?.name ?? "Anonymous").trim().slice(0, 20) || "Anonymous";
     const safeScore = Number.isFinite(Number(entry?.score)) ? Number(entry.score) : 0;
@@ -16,9 +34,7 @@ function sanitizeEntry(entry) {
 }
 
 async function readLeaderboard() {
-    if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
-        throw new Error("Leaderboard storage is not configured. Add KV_REST_API_URL and KV_REST_API_TOKEN in Vercel environment variables.");
-    }
+    resolveStorageConfig();
 
     const stored = await kv.get(LEADERBOARD_KEY);
     if (!Array.isArray(stored)) {
