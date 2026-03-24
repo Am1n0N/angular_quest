@@ -5,6 +5,8 @@ import sqlWasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url";
 const GAME_CONTENT_SEED_URL = "/seed-levels.json";
 const TOTAL_LIVES = 3;
 const QUESTION_TIME_LIMIT = 12;
+const BONUS_LIFE_STREAK = 5;
+const PENALTY_PER_WRONG = 30;
 const MEDALS = ["🥇", "🥈", "🥉"];
 const SQLITE_IDB_NAME = "angular_quest_db";
 const SQLITE_IDB_STORE = "sqlite";
@@ -766,7 +768,7 @@ export default function App() {
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [puzzleShowResult, setPuzzleShowResult] = useState(false);
   const [puzzleAttempts, setPuzzleAttempts] = useState(0);
-  const [puzzleChips, setPuzzleChips] = useState(1000);
+  const [puzzleChips, setPuzzleChips] = useState(50);
   const [puzzleCompletedIds, setPuzzleCompletedIds] = useState(new Set());
   const [puzzleTimeLeft, setPuzzleTimeLeft] = useState(0);
   const [puzzleTimerMax, setPuzzleTimerMax] = useState(0);
@@ -833,7 +835,7 @@ export default function App() {
 
     const puzzleProfile = safeLocalGet(PUZZLE_PROFILE_KEY, null);
     if (puzzleProfile) {
-      setPuzzleChips(Number(puzzleProfile.chips || 1000));
+      setPuzzleChips(Number(puzzleProfile.chips || 50));
       setPuzzleStreak(Number(puzzleProfile.streak || 0));
       setPuzzleCompletedIds(new Set(Array.isArray(puzzleProfile.completedIds) ? puzzleProfile.completedIds : []));
       setPuzzleStake(puzzleProfile.stake || "normal");
@@ -916,7 +918,10 @@ export default function App() {
   const question = level && qIdx >= 0 && qIdx < level.questions.length ? level.questions[qIdx] : null;
 
   useEffect(() => {
-    const adjusted = Math.max(10, Math.min(24, QUESTION_TIME_LIMIT - quizAdaptiveLevel * 2 + (lives <= 1 ? 2 : 0)));
+    // Improved adaptive difficulty: more forgiving when struggling
+    const baseLevelAdjustment = quizAdaptiveLevel * 2;
+    const lowLifeBonus = lives === 1 ? 4 : lives === 2 ? 2 : 0;
+    const adjusted = Math.max(10, Math.min(24, QUESTION_TIME_LIMIT - baseLevelAdjustment + lowLifeBonus));
     setQuizTimeLimit(adjusted);
   }, [quizAdaptiveLevel, lives]);
 
@@ -964,7 +969,8 @@ export default function App() {
       const elapsed = Math.min(quizTimeLimit, Math.floor((Date.now() - questionStartedAt) / 1000));
       const speedBonus = Math.max(0, Math.floor((quizTimeLimit - elapsed) * 3.5));
       const nextStreak = streak + 1;
-      const multiplier = Number((1 + Math.min(nextStreak, 6) * 0.12).toFixed(2));
+      // Unlimited streak multiplier: increases dynamically without cap
+      const multiplier = Number((1 + (nextStreak * 0.15)).toFixed(2));
       const pts = Math.round((75 * multiplier) + speedBonus);
       setLastAwardedPoints(pts);
       setLastSpeedBonus(speedBonus);
@@ -973,8 +979,17 @@ export default function App() {
       setLvlScore(s => s + pts);
       setStreak(nextStreak);
       setBestStreak(prev => Math.max(prev, nextStreak));
-      setQuizAdaptiveLevel(curr => Math.min(3, curr + (elapsed <= Math.max(3, Math.floor(quizTimeLimit * 0.4)) ? 1 : 0)));
+
+      // Smart difficulty: reduce time pressure when succeeding quickly, increase when struggling
+      const shouldIncreaseDifficulty = elapsed <= Math.max(3, Math.floor(quizTimeLimit * 0.4));
+      setQuizAdaptiveLevel(curr => shouldIncreaseDifficulty ? Math.min(5, curr + 1) : Math.max(-2, curr - 1));
       if (elapsed <= 5) setFastAnswersCount(c => c + 1);
+
+      // Bonus life on 5-streak for comeback mechanic
+      if (nextStreak > 0 && nextStreak % BONUS_LIFE_STREAK === 0 && lives < TOTAL_LIVES) {
+        setLives(l => Math.min(TOTAL_LIVES, l + 1));
+      }
+
       setShowScorePop(true);
       if (soundEnabled) playTone(860, 0.09, "triangle", 0.03);
       setTimeout(() => setShowScorePop(false), 2000);
@@ -983,10 +998,13 @@ export default function App() {
       setLastAwardedPoints(0);
       setLastSpeedBonus(0);
       setLastMultiplier(1);
-      const penalty = Math.round(score * 0.08);
+      // Fair penalty: 30 base + 2% of current score (max 50 penalty)
+      const penalty = Math.min(50, PENALTY_PER_WRONG + Math.round(score * 0.02));
       setScore(s => Math.max(0, s - penalty));
       setLives(l => l - 1);
-      setQuizAdaptiveLevel(curr => Math.max(-3, curr - 1));
+
+      // Adaptive difficulty helps when struggling: slower timer when losing lives
+      setQuizAdaptiveLevel(curr => Math.max(-2, curr - 1));
       setShake(true);
       if (soundEnabled) playTone(240, 0.12, "sawtooth", 0.03);
       setTimeout(() => setShake(false), 500);
@@ -1142,11 +1160,14 @@ export default function App() {
       boom();
       if (soundEnabled) playTone(920, 0.1, "triangle", 0.03);
       const stake = PUZZLE_STAKE_CONFIG[puzzleStake] || PUZZLE_STAKE_CONFIG.normal;
-      const timeBonus = Math.round((puzzleTimeLeft / Math.max(puzzleTimerMax, 1)) * 100);
+      // Improved time bonus: scales better with remaining time
+      const timeBonus = Math.round((puzzleTimeLeft / Math.max(puzzleTimerMax, 1)) * puzzleSelected.chips * 0.5);
       const attemptsNow = puzzleAttempts + 1;
       const perfectBonus = attemptsNow === 1 ? 200 : 0;
-      const hintPenalty = puzzleHintUsed ? Math.round(puzzleSelected.chips * 0.2) : 0;
-      const streakBonus = Math.round(puzzleStreak * 50);
+      // Reduced hint penalty from 20% to 10%
+      const hintPenalty = puzzleHintUsed ? Math.round(puzzleSelected.chips * 0.1) : 0;
+      // Improved streak bonus: scales better with streak
+      const streakBonus = Math.round(puzzleStreak * (10 + puzzleStreak * 5));
       const dailyBonus = (puzzleSelected.id === dailyPuzzle.id && dailyClaimDate !== getTodayKey() && !puzzleEndlessMode) ? 150 : 0;
       const ruleBonus = puzzleRule?.bonus || 0;
       const rawEarned = puzzleSelected.chips + timeBonus + perfectBonus + streakBonus + dailyBonus + ruleBonus - hintPenalty;
@@ -1169,35 +1190,41 @@ export default function App() {
 
     if (timedOut) {
       setPuzzleSolved(true);
-      setPuzzleChips(0);
-      setPuzzleStreak(0);
-      setPuzzleLastWin({ earned: -chipsBefore, timedOut: true, endless: puzzleEndlessMode, bust: true });
+      // Partial penalty on timeout: lose 50% instead of 100%
+      const partialLoss = Math.round(chipsBefore * 0.5);
+      setPuzzleChips(c => Math.max(0, c - partialLoss));
+      // Streak survives one timeout
+      setPuzzleLastWin({ earned: -partialLoss, timedOut: true, endless: puzzleEndlessMode, bust: true });
       if (soundEnabled) playTone(220, 0.12, "sawtooth", 0.03);
       setTimeout(() => setScreen("puzzleResult"), 800);
       return;
     }
 
     setPuzzleSolved(true);
-    setPuzzleChips(0);
-    setPuzzleStreak(0);
-    setPuzzleLastWin({ earned: -chipsBefore, timedOut: false, endless: puzzleEndlessMode, bust: true });
+    // Partial penalty on wrong answer: lose 30% instead of 100%
+    const attemptsNow = puzzleAttempts + 1;
+    const wrongPenalty = Math.round(chipsBefore * (0.15 + attemptsNow * 0.05));
+    setPuzzleChips(c => Math.max(0, c - wrongPenalty));
+    // Streak doesn't reset on first attempt, only on multiple failures
+    if (attemptsNow > 3) setPuzzleStreak(0);
+    setPuzzleLastWin({ earned: -wrongPenalty, timedOut: false, endless: puzzleEndlessMode, bust: true });
     if (soundEnabled) playTone(280, 0.09, "square", 0.02);
     setTimeout(() => setScreen("puzzleResult"), 800);
   };
 
   const handlePuzzleHint = () => {
-    if (puzzleHintUsed || puzzleSolved || puzzleRule?.id === "cleanTable") return;
+    if (puzzleHintUsed || puzzleSolved || puzzleRule?.id === "cleanTable" || puzzleChips < 50) return;
     setPuzzleHintUsed(true);
     setPuzzleShowHint(true);
-    setPuzzleChips(c => Math.max(0, c - 50));
+    setPuzzleChips(c => c - 50);
     setTimeout(() => setPuzzleShowHint(false), 3500);
   };
 
   const handlePuzzleShuffle = () => {
-    if (puzzleSolved || puzzleRule?.id === "shuffleBan") return;
+    if (puzzleSolved || puzzleRule?.id === "shuffleBan" || puzzleChips < 10) return;
     setPuzzleLines(curr => shufflePuzzleLines(curr));
     setPuzzleShowResult(false);
-    setPuzzleChips(c => Math.max(0, c - 10));
+    setPuzzleChips(c => c - 10);
     if (puzzleRule?.id === "limitedMoves") setPuzzleMovesLeft(m => Math.max(0, m - 1));
   };
 
@@ -1224,12 +1251,31 @@ export default function App() {
   const leaderboardFiltered = leaderboard.filter((entry) => {
     if (leaderboardTab === "all") return true;
     if (!entry?.ts) return leaderboardTab === "all";
+
     const entryDate = new Date(entry.ts);
-    if (leaderboardTab === "today") return entryDate.toDateString() === new Date().toDateString();
-    if (leaderboardTab === "week") {
-      const start = new Date(getWeekStartKey());
-      return entryDate >= start;
+    const entryDateStr = entryDate.toDateString();
+    const todayStr = new Date().toDateString();
+
+    if (leaderboardTab === "today") {
+      return entryDateStr === todayStr;
     }
+
+    if (leaderboardTab === "week") {
+      // Get the week start date in proper local time
+      const now = new Date();
+      const d = new Date(now);
+      const day = d.getDay();
+      const diff = (day + 6) % 7;
+      d.setDate(d.getDate() - diff);
+      d.setHours(0, 0, 0, 0);
+
+      // Get the week end (next Sunday)
+      const weekEnd = new Date(d);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+
+      return entryDate >= d && entryDate < weekEnd;
+    }
+
     return true;
   });
   const progressionTitle = playerBestScore >= 2200 ? "Grandmaster" : playerBestScore >= 1400 ? "High Roller" : playerBestScore >= 700 ? "Rising Pro" : "Starter";
@@ -2058,10 +2104,10 @@ export default function App() {
             <GoldDivider />
 
             <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <button className="casino-btn" onClick={handlePuzzleShuffle} disabled={puzzleSolved || puzzleRule?.id === "shuffleBan" || (puzzleRule?.id === "limitedMoves" && puzzleMovesLeft <= 0)} style={{ background: "rgba(255,255,255,0.75)", color: C.text, border: `1px solid ${C.border}`, padding: "10px 16px", borderRadius: 10, fontSize: 15 }}>
+              <button className="casino-btn" onClick={handlePuzzleShuffle} disabled={puzzleSolved || puzzleRule?.id === "shuffleBan" || (puzzleRule?.id === "limitedMoves" && puzzleMovesLeft <= 0) || puzzleChips < 10} style={{ background: "rgba(255,255,255,0.75)", color: C.text, border: `1px solid ${C.border}`, padding: "10px 16px", borderRadius: 10, fontSize: 15 }}>
                 🔀 Shuffle (−10)
               </button>
-              <button className="casino-btn" onClick={handlePuzzleHint} disabled={puzzleHintUsed || puzzleSolved || puzzleRule?.id === "cleanTable"} style={{ background: puzzleHintUsed || puzzleRule?.id === "cleanTable" ? "rgba(255,255,255,0.65)" : "rgba(13,95,128,0.08)", color: puzzleHintUsed || puzzleRule?.id === "cleanTable" ? C.faint : "#0d5f80", border: puzzleHintUsed || puzzleRule?.id === "cleanTable" ? `1px solid ${C.border}` : "1px solid rgba(13,95,128,0.35)", padding: "10px 16px", borderRadius: 10, fontSize: 15 }}>
+              <button className="casino-btn" onClick={handlePuzzleHint} disabled={puzzleHintUsed || puzzleSolved || puzzleRule?.id === "cleanTable" || puzzleChips < 50} style={{ background: puzzleHintUsed || puzzleRule?.id === "cleanTable" || puzzleChips < 50 ? "rgba(255,255,255,0.65)" : "rgba(13,95,128,0.08)", color: puzzleHintUsed || puzzleRule?.id === "cleanTable" || puzzleChips < 50 ? C.faint : "#0d5f80", border: puzzleHintUsed || puzzleRule?.id === "cleanTable" || puzzleChips < 50 ? `1px solid ${C.border}` : "1px solid rgba(13,95,128,0.35)", padding: "10px 16px", borderRadius: 10, fontSize: 15 }}>
                 {puzzleHintUsed ? "💡 Used" : "💡 Hint (−50)"}
               </button>
               <button className="casino-btn" onClick={() => handlePuzzleCheck(false)} disabled={puzzleSolved} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", padding: "10px 24px", borderRadius: 10, fontSize: 16, boxShadow: "0 4px 20px #ffd70044" }}>
@@ -2087,6 +2133,13 @@ export default function App() {
                 <div style={{ fontSize: 56, marginBottom: 8 }}>⏰</div>
                 <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 44, color: C.red, letterSpacing: 3 }}>Time's Up</div>
                 <p style={{ color: C.muted, margin: "6px 0 16px" }}>The puzzle timer ended for {puzzleSelected.title}.</p>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, color: C.red, marginBottom: 16 }}>{puzzleLastWin.earned} chips</div>
+              </>
+            ) : puzzleLastWin.bust ? (
+              <>
+                <div style={{ fontSize: 56, marginBottom: 8 }}>💥</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 44, color: C.red, letterSpacing: 3 }}>Bust!</div>
+                <p style={{ color: C.muted, margin: "6px 0 16px" }}>Wrong order for {puzzleSelected.title}.</p>
                 <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 38, color: C.red, marginBottom: 16 }}>{puzzleLastWin.earned} chips</div>
               </>
             ) : (
@@ -2125,7 +2178,7 @@ export default function App() {
                 ← Lobby
               </button>
               <button className="casino-btn" onClick={() => {
-                if (puzzleEndlessMode && !puzzleLastWin.timedOut) {
+                if (puzzleEndlessMode && !puzzleLastWin.timedOut && !puzzleLastWin.bust) {
                   const next = getNextEndlessPuzzle();
                   setPuzzleRound(r => r + 1);
                   startPuzzle(next, { keepRound: true, round: puzzleRound + 1 });
@@ -2133,7 +2186,7 @@ export default function App() {
                 }
                 startPuzzle(puzzleSelected);
               }} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", padding: "10px 22px", borderRadius: 10, fontSize: 16, boxShadow: "0 4px 20px #ffd70044" }}>
-                {puzzleEndlessMode && !puzzleLastWin.timedOut ? "🚀 Next Round" : "🎲 Play Again"}
+                {puzzleEndlessMode && !puzzleLastWin.timedOut && !puzzleLastWin.bust ? "🚀 Next Round" : "🎲 Play Again"}
               </button>
             </div>
           </div>
