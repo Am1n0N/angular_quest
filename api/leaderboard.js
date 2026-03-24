@@ -1,24 +1,25 @@
-import { kv } from "@vercel/kv";
+import { createClient } from "redis";
 
 const LEADERBOARD_KEY = "aq_leaderboard_v1";
 const MAX_LEADERBOARD_ENTRIES = 20;
+let redisClientPromise;
 
-function resolveStorageConfig() {
-    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-
-    if (!url || !token) {
-        throw new Error(
-            "Leaderboard storage is not configured. Set KV_REST_API_URL + KV_REST_API_TOKEN or UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN."
-        );
+async function getRedisClient() {
+    const redisUrl = process.env.REDIS_URL;
+    if (!redisUrl) {
+        throw new Error("Leaderboard storage is not configured. Set REDIS_URL in Vercel environment variables.");
     }
 
-    if (!process.env.KV_REST_API_URL) {
-        process.env.KV_REST_API_URL = url;
+    if (!redisClientPromise) {
+        redisClientPromise = (async () => {
+            const client = createClient({ url: redisUrl });
+            client.on("error", () => {});
+            await client.connect();
+            return client;
+        })();
     }
-    if (!process.env.KV_REST_API_TOKEN) {
-        process.env.KV_REST_API_TOKEN = token;
-    }
+
+    return redisClientPromise;
 }
 
 function sanitizeEntry(entry) {
@@ -34,13 +35,24 @@ function sanitizeEntry(entry) {
 }
 
 async function readLeaderboard() {
-    resolveStorageConfig();
+    const redisClient = await getRedisClient();
+    const stored = await redisClient.get(LEADERBOARD_KEY);
 
-    const stored = await kv.get(LEADERBOARD_KEY);
-    if (!Array.isArray(stored)) {
+    if (!stored) {
         return [];
     }
-    return stored;
+
+    try {
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+async function writeLeaderboard(leaderboard) {
+    const redisClient = await getRedisClient();
+    await redisClient.set(LEADERBOARD_KEY, JSON.stringify(leaderboard));
 }
 
 export default async function handler(req, res) {
@@ -58,14 +70,14 @@ export default async function handler(req, res) {
                 .sort((first, second) => second.score - first.score)
                 .slice(0, MAX_LEADERBOARD_ENTRIES);
 
-            await kv.set(LEADERBOARD_KEY, updatedLeaderboard);
+            await writeLeaderboard(updatedLeaderboard);
             return res.status(200).json({ leaderboard: updatedLeaderboard });
         }
 
         return res.status(405).json({ message: "Method not allowed" });
     } catch (error) {
         const detail = error instanceof Error ? error.message : "Unknown error";
-        const isConfigurationError = detail.toLowerCase().includes("not configured") || detail.includes("KV_REST_API");
+        const isConfigurationError = detail.toLowerCase().includes("not configured") || detail.includes("REDIS_URL");
 
         return res.status(isConfigurationError ? 503 : 500).json({
             message: "Leaderboard storage is unavailable.",
