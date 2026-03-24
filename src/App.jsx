@@ -10,6 +10,9 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 const SQLITE_IDB_NAME = "angular_quest_db";
 const SQLITE_IDB_STORE = "sqlite";
 const SQLITE_IDB_KEY = "main";
+const LEADERBOARD_CACHE_KEY = "aq_lb_v2";
+const USER_PROGRESS_KEY = "aq_user_progress_v1";
+const SHARED_LEADERBOARD_API = "/api/leaderboard";
 const COMPANY_NAME = "ARAB SOFT";
 const COMPANY_LOGO_SRC = "/company-logo.svg";
 
@@ -119,6 +122,38 @@ async function sqliteSetJson(key, value) {
   );
   const bytes = db.export();
   await writeDbBytes(bytes);
+}
+
+async function fetchSharedLeaderboard() {
+  const response = await fetch(SHARED_LEADERBOARD_API, { method: "GET" });
+  if (!response.ok) {
+    throw new Error("Unable to fetch leaderboard");
+  }
+  const payload = await response.json();
+  if (!Array.isArray(payload?.leaderboard)) {
+    return [];
+  }
+  return payload.leaderboard;
+}
+
+async function pushSharedLeaderboardEntry(entry) {
+  const response = await fetch(SHARED_LEADERBOARD_API, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(entry),
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to update leaderboard");
+  }
+
+  const payload = await response.json();
+  if (!Array.isArray(payload?.leaderboard)) {
+    return [];
+  }
+  return payload.leaderboard;
 }
 
 async function ensureGameContentSeeded() {
@@ -353,13 +388,29 @@ function Confetti({ active }) {
 
 const C = { bg:"#f2f5fb", card:"#ffffff", border:"#e2e8f0", text:"#1a1d2e", muted:"#64748b", faint:"#94a3b8" };
 
+function shuffleArray(items) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[randomIndex]] = [copy[randomIndex], copy[index]];
+  }
+  return copy;
+}
+
+function shuffleQuestionsInLevels(levels) {
+  return levels.map((level) => ({
+    ...level,
+    questions: shuffleArray(level.questions),
+  }));
+}
+
 export default function App() {
   const [screen, setScreen] = useState("intro");
   const [prevScreen, setPrevScreen] = useState("intro");
   const [playerName, setPlayerName] = useState("");
   const [nameInput, setNameInput] = useState("");
   const [levels, setLevels] = useState([]);
-  const [leaderboard, saveLeaderboard] = useStorage("aq_lb_v2", []);
+  const [leaderboard, setLeaderboard] = useState([]);
   const [levelIdx, setLevelIdx] = useState(0);
   const [qIdx, setQIdx] = useState(0);
   const [lives, setLives] = useState(TOTAL_LIVES);
@@ -371,6 +422,7 @@ export default function App() {
   const [shake, setShake] = useState(false);
   const [confetti, setConfetti] = useState(false);
   const [adminNotice, setAdminNotice] = useState("");
+  const [userProgress, setUserProgress] = useState(null);
   const importFileRef = useRef(null);
   const timer = useRef(null);
 
@@ -392,16 +444,72 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const storedProgress = await sqliteGetJson(USER_PROGRESS_KEY);
+        if (isMounted && storedProgress) {
+          setUserProgress(storedProgress);
+        }
+      } catch (_) {}
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const remoteLeaderboard = await fetchSharedLeaderboard();
+        if (isMounted) {
+          setLeaderboard(remoteLeaderboard);
+        }
+        await sqliteSetJson(LEADERBOARD_CACHE_KEY, remoteLeaderboard);
+      } catch (_) {
+        try {
+          const cachedLeaderboard = await sqliteGetJson(LEADERBOARD_CACHE_KEY);
+          if (isMounted && Array.isArray(cachedLeaderboard)) {
+            setLeaderboard(cachedLeaderboard);
+          }
+        } catch (_) {}
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const level = levels[levelIdx];
   const question = level?.questions[qIdx];
 
   const boom = () => { setConfetti(true); setTimeout(() => setConfetti(false), 2600); };
 
   const addScore = useCallback((name, s) => {
-    const updated = [...leaderboard, { name, score: s, date: new Date().toLocaleDateString() }]
-      .sort((a,b) => b.score - a.score).slice(0, 20);
-    saveLeaderboard(updated);
-  }, [leaderboard, saveLeaderboard]);
+    const entry = { name, score: s, date: new Date().toLocaleDateString() };
+
+    (async () => {
+      try {
+        const remoteUpdated = await pushSharedLeaderboardEntry(entry);
+        setLeaderboard(remoteUpdated);
+        await sqliteSetJson(LEADERBOARD_CACHE_KEY, remoteUpdated);
+      } catch (_) {
+        const localUpdated = [...leaderboard, entry]
+          .sort((a,b) => b.score - a.score)
+          .slice(0, 20);
+        setLeaderboard(localUpdated);
+        try {
+          await sqliteSetJson(LEADERBOARD_CACHE_KEY, localUpdated);
+        } catch (_) {}
+      }
+    })();
+  }, [leaderboard]);
 
   const handleAnswer = useCallback((idx) => {
     if (showFB) return;
@@ -429,15 +537,44 @@ export default function App() {
   };
 
   const startGame = (name) => {
+    setLevels((currentLevels) => shuffleQuestionsInLevels(currentLevels));
     setPlayerName(name); setLevelIdx(0); setQIdx(0); setLives(TOTAL_LIVES);
     setScore(0); setLvlScore(0); setPicked(null); setShowFB(false); setScreen("game");
   };
 
   const goLeaderboard = (from) => { setPrevScreen(from); setScreen("leaderboard"); };
+  const goAdmin = (from) => { setPrevScreen(from); setScreen("admin"); };
 
   const zoneCount = levels.length;
   const totalQuestionCount = levels.reduce((total, zone) => total + zone.questions.length, 0);
   const progress = level ? (qIdx / level.questions.length) * 100 : 0;
+
+  const currentZoneIndex = Math.min(levelIdx + 1, Math.max(zoneCount, 1));
+  const overallProgress = zoneCount === 0
+    ? 0
+    : Math.min(100, Math.round((((levelIdx) + (level ? qIdx / Math.max(level.questions.length, 1) : 0)) / zoneCount) * 100));
+
+  useEffect(() => {
+    const snapshot = {
+      playerName: playerName || "Guest",
+      screen,
+      score,
+      lives,
+      currentZone: level ? level.name : "-",
+      currentQuestion: level ? `${Math.min(qIdx + 1, level.questions.length)} / ${level.questions.length}` : "-",
+      overallProgress,
+      zonesCompleted: Math.min(levelIdx, zoneCount),
+      totalZones: zoneCount,
+      lastUpdated: new Date().toLocaleString(),
+    };
+
+    setUserProgress(snapshot);
+    (async () => {
+      try {
+        await sqliteSetJson(USER_PROGRESS_KEY, snapshot);
+      } catch (_) {}
+    })();
+  }, [playerName, screen, score, lives, level, qIdx, overallProgress, levelIdx, zoneCount]);
 
   const handleExportLevels = useCallback(async () => {
     try {
@@ -495,6 +632,29 @@ export default function App() {
         .opt:disabled { cursor:default; }
         .card-hover { transition:transform .2s,box-shadow .2s; }
         .card-hover:hover { transform:translateY(-3px); box-shadow:0 12px 36px rgba(0,0,0,.12); }
+        .intro-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:36px; }
+        .intro-actions { display:flex; gap:12px; justify-content:center; }
+        .admin-actions { display:flex; gap:8px; justify-content:center; margin-top:12px; }
+        .game-hud { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+        .question-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .admin-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; }
+
+        @media (max-width: 860px) {
+          .intro-stats { grid-template-columns:1fr; margin-bottom:22px; }
+          .intro-actions { flex-direction:column; align-items:stretch; }
+          .admin-actions { flex-direction:column; align-items:stretch; }
+          .game-hud { flex-wrap:wrap; justify-content:center; }
+          .question-options { grid-template-columns:1fr; }
+          .admin-grid { grid-template-columns:1fr; }
+        }
+
+        @media (max-width: 640px) {
+          .intro-card { padding:28px 18px !important; border-radius:20px !important; }
+          .intro-title { font-size:42px !important; }
+          .game-container { padding:16px 12px !important; }
+          .question-card { padding:18px !important; border-radius:14px !important; }
+          .hud-metrics { gap:10px !important; flex-wrap:wrap; justify-content:center; }
+        }
       `}</style>
       <BrandBadge />
       <Confetti active={confetti} />
@@ -502,7 +662,7 @@ export default function App() {
       {/* ─── INTRO ─────────────────────────────────────────────────────────── */}
       {screen === "intro" && (
         <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24,animation:"fadeUp .5s ease" }}>
-          <div style={{ background:C.card,borderRadius:28,boxShadow:"0 12px 50px rgba(0,0,0,.10)",padding:"52px 44px",maxWidth:580,width:"100%",textAlign:"center",border:`1px solid ${C.border}` }}>
+          <div className="intro-card" style={{ background:C.card,borderRadius:28,boxShadow:"0 12px 50px rgba(0,0,0,.10)",padding:"52px 44px",maxWidth:580,width:"100%",textAlign:"center",border:`1px solid ${C.border}` }}>
             {/* Zone badges */}
             <div style={{ display:"flex",justifyContent:"center",gap:8,flexWrap:"wrap",marginBottom:32 }}>
               {levels.map(l => (
@@ -511,13 +671,13 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <h1 style={{ fontSize:52,fontWeight:900,margin:"0 0 6px",background:"linear-gradient(135deg,#e63950 0%,#7b3fe4 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:-1.5 }}>
+            <h1 className="intro-title" style={{ fontSize:52,fontWeight:900,margin:"0 0 6px",background:"linear-gradient(135deg,#e63950 0%,#7b3fe4 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:-1.5 }}>
               Angular Quest
             </h1>
             <p style={{ color:C.muted,margin:"0 0 36px",fontSize:16,lineHeight:1.6 }}>
               Learn Angular through 6 knowledge zones.<br/>Components · Directives · Services · Pipes · Routing · Forms
             </p>
-            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:36 }}>
+            <div className="intro-stats">
               {[["🗺️", `${zoneCount} Zones`, "All core topics"], ["❓", `${totalQuestionCount} Questions`, "From the content database"], ["♥", `${TOTAL_LIVES} Lives`, "Choose wisely"]].map(([em,t,s])=>(
                 <div key={t} style={{ background:C.bg,borderRadius:14,padding:"14px 10px",border:`1px solid ${C.border}` }}>
                   <div style={{ fontSize:22,marginBottom:4 }}>{em}</div>
@@ -526,7 +686,7 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <div style={{ display:"flex",gap:12,justifyContent:"center" }}>
+            <div className="intro-actions">
               <button disabled={zoneCount===0} onClick={() => setScreen("namePicker")} style={{ background:zoneCount===0?C.border:"linear-gradient(135deg,#e63950,#7b3fe4)",color:zoneCount===0?C.faint:"#fff",border:"none",padding:"15px 40px",borderRadius:14,fontSize:16,fontWeight:700,cursor:zoneCount===0?"default":"pointer",fontFamily:"inherit",boxShadow:zoneCount===0?"none":"0 6px 24px rgba(123,63,228,.35)",transition:"transform .15s,box-shadow .15s" }}
                 onMouseEnter={e=>{e.target.style.transform="translateY(-2px)";e.target.style.boxShadow="0 10px 30px rgba(123,63,228,.45)"}}
                 onMouseLeave={e=>{e.target.style.transform="translateY(0)";e.target.style.boxShadow="0 6px 24px rgba(123,63,228,.35)"}}>
@@ -535,18 +695,68 @@ export default function App() {
               <button onClick={() => goLeaderboard("intro")} style={{ background:C.bg,color:C.text,border:`1.5px solid ${C.border}`,padding:"15px 24px",borderRadius:14,fontSize:15,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
                 🏆 Leaderboard
               </button>
+              <button onClick={() => goAdmin("intro")} style={{ background:C.bg,color:C.text,border:`1.5px solid ${C.border}`,padding:"15px 24px",borderRadius:14,fontSize:15,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
+                🛠 Admin
+              </button>
             </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
-              <button onClick={handleExportLevels} style={{ background: C.bg, color: C.text, border: `1.5px solid ${C.border}`, padding: "10px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            {adminNotice && <div style={{ marginTop: 8, fontSize: 12, color: C.faint }}>{adminNotice}</div>}
+            {zoneCount===0 && <div style={{ marginTop: 8, fontSize: 12, color: C.faint }}>Loading content from database…</div>}
+          </div>
+        </div>
+      )}
+
+      {/* ─── ADMIN ─────────────────────────────────────────────────────────── */}
+      {screen === "admin" && (
+        <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24,animation:"fadeUp .4s ease" }}>
+          <div style={{ background:C.card,borderRadius:24,boxShadow:"0 8px 36px rgba(0,0,0,.10)",padding:"34px 30px",maxWidth:760,width:"100%",border:`1px solid ${C.border}` }}>
+            <div style={{ textAlign:"center",marginBottom:18 }}>
+              <div style={{ fontSize:42,marginBottom:6 }}>🛠</div>
+              <h2 style={{ fontSize:30,fontWeight:800,margin:"0 0 4px" }}>Admin Dashboard</h2>
+              <p style={{ margin:0,color:C.muted,fontSize:14 }}>Manage game content and monitor user progress</p>
+            </div>
+
+            <div className="admin-grid">
+              <div style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 12px" }}>
+                <div style={{ fontSize:11,color:C.faint,fontWeight:700,letterSpacing:.7 }}>PLAYER</div>
+                <div style={{ fontSize:18,fontWeight:800 }}>{userProgress?.playerName || "Guest"}</div>
+              </div>
+              <div style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 12px" }}>
+                <div style={{ fontSize:11,color:C.faint,fontWeight:700,letterSpacing:.7 }}>CURRENT SCREEN</div>
+                <div style={{ fontSize:18,fontWeight:800,textTransform:"capitalize" }}>{userProgress?.screen || "intro"}</div>
+              </div>
+              <div style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 12px" }}>
+                <div style={{ fontSize:11,color:C.faint,fontWeight:700,letterSpacing:.7 }}>PROGRESS</div>
+                <div style={{ fontSize:18,fontWeight:800 }}>{userProgress?.overallProgress ?? 0}%</div>
+                <div style={{ fontSize:12,color:C.faint }}>{userProgress?.zonesCompleted ?? 0} / {userProgress?.totalZones ?? zoneCount} zones</div>
+              </div>
+              <div style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 12px" }}>
+                <div style={{ fontSize:11,color:C.faint,fontWeight:700,letterSpacing:.7 }}>SESSION</div>
+                <div style={{ fontSize:14,fontWeight:700 }}>Score: {userProgress?.score ?? 0} · Lives: {userProgress?.lives ?? TOTAL_LIVES}</div>
+                <div style={{ fontSize:12,color:C.faint }}>Zone: {userProgress?.currentZone || "-"} · Q: {userProgress?.currentQuestion || "-"}</div>
+              </div>
+            </div>
+
+            <div style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",marginBottom:16 }}>
+              <div style={{ fontSize:11,color:C.faint,fontWeight:700,letterSpacing:.7,marginBottom:4 }}>LAST UPDATE</div>
+              <div style={{ fontWeight:600,fontSize:14 }}>{userProgress?.lastUpdated || "Not available"}</div>
+            </div>
+
+            <div className="admin-actions" style={{ marginTop:0, marginBottom: 6 }}>
+              <button onClick={handleExportLevels} style={{ background: C.bg, color: C.text, border: `1.5px solid ${C.border}`, padding: "11px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                 Export Levels JSON
               </button>
-              <button onClick={() => importFileRef.current?.click()} style={{ background: C.bg, color: C.text, border: `1.5px solid ${C.border}`, padding: "10px 14px", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              <button onClick={() => importFileRef.current?.click()} style={{ background: C.bg, color: C.text, border: `1.5px solid ${C.border}`, padding: "11px 14px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                 Import Levels JSON
               </button>
               <input ref={importFileRef} type="file" accept="application/json" style={{ display: "none" }} onChange={handleImportLevels} />
             </div>
-            {adminNotice && <div style={{ marginTop: 8, fontSize: 12, color: C.faint }}>{adminNotice}</div>}
-            {zoneCount===0 && <div style={{ marginTop: 8, fontSize: 12, color: C.faint }}>Loading content from database…</div>}
+
+            {adminNotice && <div style={{ marginTop: 8, fontSize: 12, color: C.faint, textAlign:"center" }}>{adminNotice}</div>}
+
+            <div style={{ display:"flex",gap:10,justifyContent:"center",marginTop:18 }}>
+              <button onClick={() => setScreen(prevScreen)} style={{ background:C.bg,border:`1.5px solid ${C.border}`,color:C.text,padding:"12px 20px",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>← Back</button>
+              <button onClick={() => setScreen("namePicker")} style={{ background:"linear-gradient(135deg,#e63950,#7b3fe4)",color:"#fff",border:"none",padding:"12px 26px",borderRadius:12,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>Play Now →</button>
+            </div>
           </div>
         </div>
       )}
@@ -579,10 +789,10 @@ export default function App() {
 
       {/* ─── GAME ──────────────────────────────────────────────────────────── */}
       {screen === "game" && level && question && (
-        <div style={{ minHeight:"100vh",display:"flex",flexDirection:"column",animation:shake?"shake .4s ease":"none" }}>
+        <div className="game-container" style={{ minHeight:"100vh",display:"flex",flexDirection:"column",animation:shake?"shake .4s ease":"none" }}>
 
           {/* HUD */}
-          <div style={{ background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(0,0,0,.06)" }}>
+          <div className="game-hud" style={{ background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px",position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 12px rgba(0,0,0,.06)" }}>
             <div style={{ display:"flex",alignItems:"center",gap:10 }}>
               <div style={{ width:38,height:38,borderRadius:11,background:level.light,display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,color:level.color,border:`1.5px solid ${level.color}33` }}>{level.icon}</div>
               <div>
@@ -590,7 +800,7 @@ export default function App() {
                 <div style={{ fontSize:11,color:C.faint }}>{level.subtitle}</div>
               </div>
             </div>
-            <div style={{ display:"flex",gap:18,alignItems:"center" }}>
+            <div className="hud-metrics" style={{ display:"flex",gap:18,alignItems:"center" }}>
               <div style={{ textAlign:"center" }}>
                 <div style={{ fontSize:10,color:C.faint,fontWeight:600,letterSpacing:.5 }}>PLAYER</div>
                 <div style={{ fontWeight:700,fontSize:13 }}>{playerName}</div>
@@ -644,12 +854,12 @@ export default function App() {
                 {question.q}
               </div>
 
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div className="question-options">
                 {question.options.map((opt,i) => {
                   const labels = ["A","B","C","D"];
                   let bg=C.bg, border=`1.5px solid ${C.border}`, clr=C.text, shadow="none", badgeBg=C.border, badgeClr=C.muted;
                   if (showFB) {
-                    if (i===question.answer) { bg="#ecfdf5"; border="1.5px solid #10b981"; clr="#065f46"; shadow="0 0 0 3px #10b98120"; badgeBg="#10b981"; badgeClr="#fff"; }
+                    if (isCorrect && i===question.answer) { bg="#ecfdf5"; border="1.5px solid #10b981"; clr="#065f46"; shadow="0 0 0 3px #10b98120"; badgeBg="#10b981"; badgeClr="#fff"; }
                     else if (i===picked && !isCorrect) { bg="#fef2f2"; border="1.5px solid #ef4444"; clr="#7f1d1d"; shadow="0 0 0 3px #ef444420"; badgeBg="#ef4444"; badgeClr="#fff"; }
                   } else if (picked===i) { bg=level.light; border=`1.5px solid ${level.color}`; clr=level.color; badgeBg=level.color; badgeClr="#fff"; }
                   return (
