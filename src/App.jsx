@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import initSqlJs from "sql.js";
+import sqlWasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url";
 
 const GAME_CONTENT_SEED_URL = "/seed-levels.json";
 
@@ -56,7 +57,12 @@ async function getSqliteDb() {
   if (!sqliteDbPromise) {
     sqliteDbPromise = (async () => {
       const SQL = await initSqlJs({
-        locateFile: (file) => `https://sql.js.org/dist/${file}`,
+        locateFile: (file) => {
+          if (file.endsWith(".wasm")) {
+            return sqlWasmUrl;
+          }
+          return file;
+        },
       });
 
       const existingBytes = await readDbBytes();
