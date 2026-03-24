@@ -1,10 +1,17 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url";
+import RaceThreeScene from "./RaceThreeScene";
 
 const GAME_CONTENT_SEED_URL = "/seed-levels.json";
 const TOTAL_LIVES = 3;
 const QUESTION_TIME_LIMIT = 12;
+const RACE_DISTANCE = 1200;
+const RACE_QUESTION_TIME_LIMIT = 9;
+const RACE_BASE_PLAYER_SPEED = 46;
+const RACE_BASE_CPU_SPEED = 44;
+const RACE_MIN_SPEED = 28;
+const RACE_MAX_SPEED = 74;
 const BONUS_LIFE_STREAK = 5;
 const PENALTY_PER_WRONG = 30;
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -493,6 +500,17 @@ function shuffleQuestionsInLevels(levels) {
   return levels.map(level => ({ ...level, questions: shuffleArray(level.questions) }));
 }
 
+function buildRaceQuestions(levels) {
+  const pool = levels.flatMap(level =>
+    level.questions.map(question => ({
+      ...question,
+      zoneName: level.name,
+      zoneIcon: level.icon,
+    }))
+  );
+  return shuffleArray(pool);
+}
+
 function shufflePuzzleLines(items) {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -784,10 +802,33 @@ export default function App() {
   const [puzzleMovesLeft, setPuzzleMovesLeft] = useState(0);
   const [puzzleLockedLineId, setPuzzleLockedLineId] = useState("");
   const [puzzleStars, setPuzzleStars] = useState({});
+  const [raceQuestions, setRaceQuestions] = useState([]);
+  const [raceQuestionIdx, setRaceQuestionIdx] = useState(0);
+  const [raceQuestionTimeLeft, setRaceQuestionTimeLeft] = useState(RACE_QUESTION_TIME_LIMIT);
+  const [raceQuestionStartedAt, setRaceQuestionStartedAt] = useState(Date.now());
+  const [racePicked, setRacePicked] = useState(null);
+  const [raceShowFeedback, setRaceShowFeedback] = useState(false);
+  const [raceIsCorrect, setRaceIsCorrect] = useState(false);
+  const [raceFeedbackLabel, setRaceFeedbackLabel] = useState("");
+  const [racePlayerDistance, setRacePlayerDistance] = useState(0);
+  const [raceCpuDistance, setRaceCpuDistance] = useState(0);
+  const [racePlayerSpeed, setRacePlayerSpeed] = useState(RACE_BASE_PLAYER_SPEED);
+  const [raceCpuSpeed, setRaceCpuSpeed] = useState(RACE_BASE_CPU_SPEED);
+  const [raceBoostPulse, setRaceBoostPulse] = useState(0);
+  const [raceSlowPulse, setRaceSlowPulse] = useState(0);
+  const [raceResult, setRaceResult] = useState(null);
+  const [raceCorrectCount, setRaceCorrectCount] = useState(0);
+  const [raceWrongCount, setRaceWrongCount] = useState(0);
+  const [raceStartTs, setRaceStartTs] = useState(0);
+  const [raceFinalScore, setRaceFinalScore] = useState(0);
+  const [raceLeaderboardSaved, setRaceLeaderboardSaved] = useState(false);
   const [dailyClaimDate, setDailyClaimDate] = useState("");
   const importFileRef = useRef(null);
   const timer = useRef(null);
   const puzzleTimer = useRef(null);
+  const raceFeedbackTimer = useRef(null);
+  const racePlayerSpeedRef = useRef(RACE_BASE_PLAYER_SPEED);
+  const raceCpuSpeedRef = useRef(RACE_BASE_CPU_SPEED);
   const abortCtrlRef = useRef(null);
 
   useEffect(() => {
@@ -916,6 +957,9 @@ export default function App() {
 
   const level = levels && levelIdx >= 0 && levelIdx < levels.length ? levels[levelIdx] : null;
   const question = level && qIdx >= 0 && qIdx < level.questions.length ? level.questions[qIdx] : null;
+  const raceQuestion = raceQuestions.length > 0 ? raceQuestions[raceQuestionIdx % raceQuestions.length] : null;
+  const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
+  const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
 
   useEffect(() => {
     // Improved adaptive difficulty: more forgiving when struggling
@@ -1050,6 +1094,7 @@ export default function App() {
     }
     if (timer.current) clearTimeout(timer.current);
     if (puzzleTimer.current) clearTimeout(puzzleTimer.current);
+    if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
     if (abortCtrlRef.current) abortCtrlRef.current.abort();
     setLevels(curr => shuffleQuestionsInLevels(curr));
     setPlayerName(alias); setNameInput(alias); setLevelIdx(0); setQIdx(0); setLives(TOTAL_LIVES);
@@ -1058,6 +1103,152 @@ export default function App() {
     setQuestionTimeLeft(QUESTION_TIME_LIMIT); setLastAwardedPoints(0); setLastSpeedBonus(0); setLastMultiplier(1);
     setPicked(null); setShowFB(false); setScreen("game");
   };
+
+  const startRace = useCallback((name = playerName) => {
+    const alias = (name || "").trim();
+    if (!alias) {
+      setScreen("namePicker");
+      return;
+    }
+    const pool = buildRaceQuestions(levels);
+    if (pool.length === 0) return;
+    if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
+    setPlayerName(alias);
+    setNameInput(alias);
+    setRaceQuestions(pool.slice(0, Math.min(24, pool.length)));
+    setRaceQuestionIdx(0);
+    setRaceQuestionTimeLeft(RACE_QUESTION_TIME_LIMIT);
+    setRaceQuestionStartedAt(Date.now());
+    setRacePicked(null);
+    setRaceShowFeedback(false);
+    setRaceIsCorrect(false);
+    setRaceFeedbackLabel("");
+    setRacePlayerDistance(0);
+    setRaceCpuDistance(0);
+    setRacePlayerSpeed(RACE_BASE_PLAYER_SPEED);
+    setRaceCpuSpeed(RACE_BASE_CPU_SPEED);
+    racePlayerSpeedRef.current = RACE_BASE_PLAYER_SPEED;
+    raceCpuSpeedRef.current = RACE_BASE_CPU_SPEED;
+    setRaceBoostPulse(0);
+    setRaceSlowPulse(0);
+    setRaceResult(null);
+    setRaceCorrectCount(0);
+    setRaceWrongCount(0);
+    setRaceFinalScore(0);
+    setRaceLeaderboardSaved(false);
+    setRaceStartTs(Date.now());
+    setScreen("raceGame");
+  }, [levels, playerName]);
+
+  const handleRaceAnswer = useCallback((idx, timedOut = false) => {
+    if (raceShowFeedback || !raceQuestion || screen !== "raceGame") return;
+    if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
+    const correct = idx === raceQuestion.answer;
+    setRacePicked(idx);
+    setRaceIsCorrect(correct);
+    setRaceShowFeedback(true);
+
+    if (correct) {
+      setRaceCorrectCount(c => c + 1);
+      setRaceFeedbackLabel("Boost engaged!");
+      setRacePlayerSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 14));
+      setRaceCpuSpeed(speed => Math.max(RACE_MIN_SPEED, speed - 4));
+      setRaceBoostPulse(v => v + 1);
+      if (soundEnabled) playTone(930, 0.08, "triangle", 0.03);
+    } else {
+      setRaceWrongCount(c => c + 1);
+      setRaceFeedbackLabel(timedOut ? "Time up - traction lost!" : "Wrong answer - speed down!");
+      setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - 11));
+      setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 6));
+      setRaceSlowPulse(v => v + 1);
+      if (soundEnabled) playTone(260, 0.1, "sawtooth", 0.025);
+    }
+
+    raceFeedbackTimer.current = setTimeout(() => {
+      setRaceShowFeedback(false);
+      setRacePicked(null);
+      setRaceQuestionIdx(i => i + 1);
+    }, 900);
+  }, [raceShowFeedback, raceQuestion, screen, soundEnabled]);
+
+  useEffect(() => {
+    racePlayerSpeedRef.current = racePlayerSpeed;
+  }, [racePlayerSpeed]);
+
+  useEffect(() => {
+    raceCpuSpeedRef.current = raceCpuSpeed;
+  }, [raceCpuSpeed]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || !raceQuestion || raceResult) return undefined;
+    if (raceShowFeedback) return undefined;
+    const startedAt = Date.now();
+    setRaceQuestionStartedAt(startedAt);
+    setRaceQuestionTimeLeft(RACE_QUESTION_TIME_LIMIT);
+    const id = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const left = Math.max(0, RACE_QUESTION_TIME_LIMIT - elapsed);
+      setRaceQuestionTimeLeft(left);
+      if (left <= 0) {
+        clearInterval(id);
+        handleRaceAnswer(-1, true);
+      }
+    }, 200);
+    return () => clearInterval(id);
+  }, [screen, raceQuestion, raceShowFeedback, raceResult, handleRaceAnswer]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || raceResult) return undefined;
+    const id = setInterval(() => {
+      setRacePlayerSpeed(curr => {
+        const next = Math.max(RACE_MIN_SPEED, Math.min(RACE_MAX_SPEED, curr + (RACE_BASE_PLAYER_SPEED - curr) * 0.1));
+        racePlayerSpeedRef.current = next;
+        return next;
+      });
+
+      setRaceCpuSpeed(curr => {
+        const target = RACE_BASE_CPU_SPEED + (Math.random() * 3 - 1.5);
+        const next = Math.max(RACE_MIN_SPEED, Math.min(RACE_MAX_SPEED, curr + (target - curr) * 0.14));
+        raceCpuSpeedRef.current = next;
+        return next;
+      });
+
+      setRacePlayerDistance(distance => Math.min(RACE_DISTANCE, distance + racePlayerSpeedRef.current * 0.08));
+      setRaceCpuDistance(distance => Math.min(RACE_DISTANCE, distance + raceCpuSpeedRef.current * 0.08));
+    }, 80);
+    return () => clearInterval(id);
+  }, [screen, raceResult]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || raceResult) return;
+    const playerFinished = racePlayerDistance >= RACE_DISTANCE;
+    const cpuFinished = raceCpuDistance >= RACE_DISTANCE;
+    if (!playerFinished && !cpuFinished) return;
+
+    const playerWon = playerFinished && (!cpuFinished || racePlayerDistance >= raceCpuDistance);
+    const elapsedSeconds = Math.max(1, Math.floor((Date.now() - raceStartTs) / 1000));
+    const placementBonus = playerWon ? 350 : 90;
+    const paceBonus = Math.max(0, 220 - elapsedSeconds * 3);
+    const answerScore = raceCorrectCount * 120 - raceWrongCount * 45;
+    const distanceScore = Math.round((racePlayerDistance / RACE_DISTANCE) * 450);
+    const finalScore = Math.max(50, placementBonus + paceBonus + answerScore + distanceScore);
+
+    setRaceResult(playerWon ? "win" : "lose");
+    setRaceFinalScore(finalScore);
+
+    if (!raceLeaderboardSaved) {
+      addScore(playerName || "Guest", finalScore);
+      setRaceLeaderboardSaved(true);
+    }
+
+    setScreen("raceResult");
+  }, [screen, raceResult, racePlayerDistance, raceCpuDistance, raceStartTs, raceCorrectCount, raceWrongCount, raceLeaderboardSaved, addScore, playerName]);
+
+  useEffect(() => {
+    if (screen === "raceGame") return undefined;
+    if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
+    return undefined;
+  }, [screen]);
 
   const savePlayerAlias = () => {
     const alias = nameInput.trim();
@@ -1313,7 +1504,7 @@ export default function App() {
   useEffect(() => {
     const snapshot = {
       playerName: playerName || "Guest", screen, score, lives,
-      mode: ["game", "levelDone", "gameOver", "victory", "namePicker"].includes(screen) ? "quiz" : ["puzzleLobby", "puzzleGame", "puzzleResult"].includes(screen) ? "puzzle" : "menu",
+      mode: ["game", "levelDone", "gameOver", "victory", "namePicker"].includes(screen) ? "quiz" : ["puzzleLobby", "puzzleGame", "puzzleResult"].includes(screen) ? "puzzle" : ["raceGame", "raceResult"].includes(screen) ? "race" : "menu",
       levelIdx,
       qIdx,
       currentZone: level ? level.name : "-",
@@ -1420,6 +1611,7 @@ export default function App() {
     return () => {
       if (timer.current) clearTimeout(timer.current);
       if (puzzleTimer.current) clearTimeout(puzzleTimer.current);
+      if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
       if (abortCtrlRef.current) abortCtrlRef.current.abort();
     };
   }, []);
@@ -1490,6 +1682,9 @@ export default function App() {
         @keyframes borderDance{ 0%{border-color:#ffd700} 25%{border-color:#ff3366} 50%{border-color:#00ffaa} 75%{border-color:#00d4ff} 100%{border-color:#ffd700} }
         @keyframes spinIn    { from{transform:rotateY(90deg);opacity:0} to{transform:rotateY(0deg);opacity:1} }
         @keyframes tickerScroll{ 0%{transform:translateX(100%)} 100%{transform:translateX(-100%)} }
+        @keyframes laneScroll { from{background-position-y:0} to{background-position-y:48px} }
+        @keyframes boostGlow { 0%,100%{box-shadow:0 0 12px rgba(0,255,170,0.45)} 50%{box-shadow:0 0 24px rgba(0,255,170,0.9)} }
+        @keyframes trailFade { 0%{opacity:0.95;transform:scale(1)} 100%{opacity:0;transform:scale(0.2)} }
 
         ${reducedMotion ? `
         * {
@@ -1550,12 +1745,13 @@ export default function App() {
         <div style={{ maxWidth: 1080, margin: "0 auto", border: `1px solid ${C.border}`, borderRadius: 14, background: "rgba(255,255,255,0.9)", boxShadow: "0 8px 22px rgba(67,44,7,0.08)", padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
             <span style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 16, color: C.text }}>Angular Quest Arena</span>
-            <span style={{ fontSize: 11, color: C.faint, letterSpacing: 0.4 }}>Quiz + Poker Puzzle</span>
+            <span style={{ fontSize: 11, color: C.faint, letterSpacing: 0.4 }}>Quiz + Racer + Poker Puzzle</span>
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button className="casino-btn" onClick={() => setScreen("intro")} style={{ background: screen === "intro" ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.86)", color: screen === "intro" ? "#3a2400" : C.text, border: `1px solid ${C.border}`, borderRadius: 999, padding: "7px 12px", fontSize: 13 }}>Home</button>
             <button className="casino-btn" onClick={() => startGame(playerName)} style={{ background: ["namePicker", "game", "levelDone", "gameOver", "victory", "result", "question", "mode"].includes(screen) ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.86)", color: ["namePicker", "game", "levelDone", "gameOver", "victory", "result", "question", "mode"].includes(screen) ? "#3a2400" : C.text, border: `1px solid ${C.border}`, borderRadius: 999, padding: "7px 12px", fontSize: 13 }}>Quiz</button>
+            <button className="casino-btn" onClick={() => startRace(playerName)} style={{ background: ["raceGame", "raceResult"].includes(screen) ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.86)", color: ["raceGame", "raceResult"].includes(screen) ? "#3a2400" : C.text, border: `1px solid ${C.border}`, borderRadius: 999, padding: "7px 12px", fontSize: 13 }}>Race</button>
             <button className="casino-btn" onClick={() => (playerName.trim() ? setScreen("puzzleLobby") : setScreen("namePicker"))} style={{ background: ["puzzleLobby", "puzzleGame", "puzzleResult"].includes(screen) ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.86)", color: ["puzzleLobby", "puzzleGame", "puzzleResult"].includes(screen) ? "#3a2400" : C.text, border: `1px solid ${C.border}`, borderRadius: 999, padding: "7px 12px", fontSize: 13 }}>Poker</button>
             <button className="casino-btn" onClick={() => goLeaderboard(screen)} style={{ background: screen === "leaderboard" ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.86)", color: screen === "leaderboard" ? "#3a2400" : C.text, border: `1px solid ${C.border}`, borderRadius: 999, padding: "7px 12px", fontSize: 13 }}>Leaderboard</button>
             <button className="casino-btn" onClick={() => setScreen("settings")} style={{ background: screen === "settings" ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.86)", color: screen === "settings" ? "#3a2400" : C.text, border: `1px solid ${C.border}`, borderRadius: 999, padding: "7px 12px", fontSize: 13 }}>Settings</button>
@@ -1701,6 +1897,18 @@ export default function App() {
                   borderRadius: 14, fontSize: 16, letterSpacing: 1
                 }}>
                 🏆 Hall of Fame
+              </button>
+              <button
+                className="casino-btn"
+                disabled={zoneCount === 0}
+                onClick={() => startRace(playerName)}
+                style={{
+                  background: "rgba(255,255,255,0.75)", color: C.text,
+                  border: `1.5px solid ${C.border}`, padding: "15px 24px",
+                  borderRadius: 14, fontSize: 16, letterSpacing: 1,
+                  opacity: zoneCount === 0 ? 0.6 : 1
+                }}>
+                🏁 Angular Racer
               </button>
               <button
                 className="casino-btn"
@@ -2447,6 +2655,133 @@ export default function App() {
                   <div style={{ fontSize: 13, color: isCorrect ? "#00cc88" : "#cc3355", lineHeight: 1.65 }}>{question.explanation}</div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── RACE GAME ───────────────────────────────────────────────────── */}
+      {screen === "raceGame" && raceQuestion && (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 14px 28px", animation: "fadeUp 0.35s ease" }}>
+          <div style={{ width: "100%", maxWidth: 980, display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <button className="casino-btn" onClick={() => setScreen("intro")} style={{ background: "rgba(255,255,255,0.8)", color: C.text, border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 14px", fontSize: 14 }}>
+                ← Exit Race
+              </button>
+              <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: C.faint }}>Question {raceQuestionIdx + 1}</div>
+                <div style={{ fontSize: 12, color: C.faint }}>✅ {raceCorrectCount}</div>
+                <div style={{ fontSize: 12, color: C.faint }}>❌ {raceWrongCount}</div>
+                <TimerRing value={raceQuestionTimeLeft} max={RACE_QUESTION_TIME_LIMIT} />
+              </div>
+            </div>
+
+            <RaceThreeScene
+              playerProgress={racePlayerProgress}
+              cpuProgress={raceCpuProgress}
+              playerSpeed={racePlayerSpeed}
+              cpuSpeed={raceCpuSpeed}
+              boostPulse={raceBoostPulse}
+              slowPulse={raceSlowPulse}
+            />
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -2, marginBottom: 2, fontSize: 12, color: C.muted }}>
+              <span>Player distance: <b style={{ color: C.text }}>{racePlayerProgress.toFixed(1)}%</b></span>
+              <span>CPU distance: <b style={{ color: C.text }}>{raceCpuProgress.toFixed(1)}%</b></span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: 10 }}>
+              <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.68)", padding: "10px 12px" }}>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Player Speed</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: racePlayerSpeed > raceCpuSpeed ? "#1f7a5c" : C.text }}>{Math.round(racePlayerSpeed)} mph</div>
+              </div>
+              <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.68)", padding: "10px 12px" }}>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>CPU Speed</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: raceCpuSpeed > racePlayerSpeed ? "#a35000" : C.text }}>{Math.round(raceCpuSpeed)} mph</div>
+              </div>
+            </div>
+
+            <div className="felt-table" style={{ borderRadius: 16, padding: "16px 18px" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 24 }}>{raceQuestion.zoneIcon || "🏁"}</div>
+                <div>
+                  <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Question Zone</div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: C.text, fontSize: 15 }}>{raceQuestion.zoneName || "Angular"}</div>
+                </div>
+              </div>
+
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: C.text, marginBottom: 12, lineHeight: 1.5 }}>{raceQuestion.q}</div>
+
+              <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: 8 }}>
+                {raceQuestion.options.map((opt, i) => {
+                  const selected = racePicked === i;
+                  const correct = raceShowFeedback && i === raceQuestion.answer;
+                  const wrong = raceShowFeedback && selected && !raceIsCorrect;
+                  return (
+                    <button
+                      key={`${raceQuestionIdx}-${i}`}
+                      className="opt-casino"
+                      disabled={raceShowFeedback}
+                      onClick={() => handleRaceAnswer(i)}
+                      style={{
+                        borderRadius: 10,
+                        border: `1.5px solid ${correct ? "#1f7a5c" : wrong ? "#b02f4b" : selected ? C.gold : C.border}`,
+                        padding: "10px 12px",
+                        background: correct ? "rgba(31,122,92,0.1)" : wrong ? "rgba(176,47,75,0.1)" : "rgba(255,255,255,0.8)",
+                        color: correct ? "#1f7a5c" : wrong ? "#b02f4b" : C.text,
+                        fontSize: 14,
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {raceShowFeedback && (
+                <div style={{ marginTop: 10, borderRadius: 10, border: `1px solid ${raceIsCorrect ? "rgba(31,122,92,0.45)" : "rgba(176,47,75,0.45)"}`, background: raceIsCorrect ? "rgba(31,122,92,0.08)" : "rgba(176,47,75,0.08)", padding: "9px 12px", color: raceIsCorrect ? "#1f7a5c" : "#b02f4b", fontSize: 13, fontWeight: 700 }}>
+                  {raceFeedbackLabel}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── RACE RESULT ─────────────────────────────────────────────────── */}
+      {screen === "raceResult" && (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "28px 20px", animation: "fadeUp 0.4s ease" }}>
+          <div className="felt-table" style={{ borderRadius: 24, padding: "34px 30px", maxWidth: 520, width: "100%", textAlign: "center" }}>
+            <div style={{ fontSize: 64, marginBottom: 8 }}>{raceResult === "win" ? "🏁" : "💨"}</div>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 46, letterSpacing: 3, color: raceResult === "win" ? C.gold : C.red }}>
+              {raceResult === "win" ? "Finish Line!" : "Race Lost"}
+            </div>
+            <p style={{ color: C.muted, margin: "4px 0 16px", fontSize: 14 }}>
+              {raceResult === "win" ? "You outran the CPU with smart Angular answers." : "CPU reached the finish first. Refuel and retry."}
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 16 }}>
+              <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, padding: "10px 8px", background: "rgba(255,255,255,0.7)" }}>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase" }}>Correct</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "#1f7a5c" }}>{raceCorrectCount}</div>
+              </div>
+              <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, padding: "10px 8px", background: "rgba(255,255,255,0.7)" }}>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase" }}>Wrong</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: "#b02f4b" }}>{raceWrongCount}</div>
+              </div>
+              <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, padding: "10px 8px", background: "rgba(255,255,255,0.7)" }}>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase" }}>Score</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, color: C.gold }}>{raceFinalScore}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button className="casino-btn" onClick={() => goLeaderboard("raceResult")} style={{ background: "rgba(255,255,255,0.8)", color: C.text, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14 }}>
+                🏆 Leaderboard
+              </button>
+              <button className="casino-btn" onClick={() => startRace(playerName)} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", borderRadius: 10, padding: "10px 18px", fontSize: 15 }}>
+                🏁 Race Again
+              </button>
             </div>
           </div>
         </div>
