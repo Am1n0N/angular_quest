@@ -140,6 +140,21 @@ io.on("connection", (socket) => {
         });
     });
 
+    socket.on("race:finish", (payload = {}) => {
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) return;
+
+        socket.to(roomCode).emit("race:finish", {
+            roomCode,
+            winnerName: String(payload.winnerName || socket.data.playerName || "Opponent").trim().slice(0, 32),
+            playerName: socket.data.playerName || "Opponent",
+            playerDistance: Number(payload.playerDistance || 0),
+            opponentDistance: Number(payload.opponentDistance || 0),
+            endedAt: Number(payload.endedAt || Date.now()),
+            reason: payload.reason || "finish",
+        });
+    });
+
     socket.on("race:leave", leaveRoom);
     socket.on("disconnect", leaveRoom);
 });

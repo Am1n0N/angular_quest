@@ -868,6 +868,7 @@ export default function App() {
   const [raceSocketStatus, setRaceSocketStatus] = useState("idle");
   const [raceOpponentName, setRaceOpponentName] = useState("Opponent");
   const [raceOpponentReady, setRaceOpponentReady] = useState(false);
+  const [raceHadOpponent, setRaceHadOpponent] = useState(false);
   const [dailyClaimDate, setDailyClaimDate] = useState("");
   const importFileRef = useRef(null);
   const timer = useRef(null);
@@ -1024,6 +1025,7 @@ export default function App() {
   const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
   const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
   const isRacePvp = raceMode === "pvp" && PVP_AVAILABLE;
+  const showRacePreMatchOverlay = isRacePvp && !raceOpponentReady && (raceSocketStatus === "idle" || raceSocketStatus === "connecting" || raceSocketStatus === "waiting");
   const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const racePlayerLabel = playerName?.trim() || "You";
   const raceOpponentLabel = isRacePvp ? (raceOpponentName || "Opponent") : "CPU";
@@ -1194,6 +1196,7 @@ export default function App() {
     setRaceRoomCode("");
     setRaceOpponentName("Opponent");
     setRaceOpponentReady(false);
+    setRaceHadOpponent(false);
   }, []);
 
   const startRace = useCallback((name = playerName, mode = raceMode) => {
@@ -1259,6 +1262,7 @@ export default function App() {
       setRaceSocketStatus("connecting");
       setRaceOpponentName("Waiting...");
       setRaceOpponentReady(false);
+      setRaceHadOpponent(false);
 
       socket.on("connect", () => {
         setRaceSocketStatus("waiting");
@@ -1271,6 +1275,7 @@ export default function App() {
         if (other) {
           setRaceOpponentName(other.name || "Opponent");
           setRaceOpponentReady(true);
+          setRaceHadOpponent(true);
           setRaceSocketStatus("matched");
         } else {
           setRaceOpponentName("Waiting...");
@@ -1286,6 +1291,22 @@ export default function App() {
         setRaceCpuDistance(Math.max(0, Math.min(RACE_DISTANCE, Number(payload.distance) || 0)));
         setRaceCpuSpeed(Math.max(RACE_MIN_SPEED, Math.min(RACE_MAX_SPEED, Number(payload.speed) || RACE_BASE_CPU_SPEED)));
         if (payload.playerName) setRaceOpponentName(payload.playerName);
+      });
+
+      socket.on("race:finish", (payload = {}) => {
+        const winnerName = String(payload.winnerName || "").trim();
+        const localWon = winnerName ? winnerName === alias : false;
+        const incomingPlayerDistance = Number(payload.opponentDistance);
+        const incomingCpuDistance = Number(payload.playerDistance);
+
+        if (Number.isFinite(incomingPlayerDistance)) {
+          setRacePlayerDistance(Math.max(0, Math.min(RACE_DISTANCE, incomingPlayerDistance)));
+        }
+        if (Number.isFinite(incomingCpuDistance)) {
+          setRaceCpuDistance(Math.max(0, Math.min(RACE_DISTANCE, incomingCpuDistance)));
+        }
+        setRaceResult(localWon ? "win" : "lose");
+        setRaceEndReason(payload.reason === "forfeit" ? "forfeit" : "finish");
       });
 
       socket.on("race:opponent-left", () => {
@@ -1309,6 +1330,7 @@ export default function App() {
       disconnectRaceSocket();
       setRaceOpponentName("CPU");
       setRaceOpponentReady(true);
+      setRaceHadOpponent(false);
     }
 
     setScreen("raceGame");
@@ -1444,6 +1466,20 @@ export default function App() {
     const distanceScore = Math.round((racePlayerDistance / RACE_DISTANCE) * 450);
     const finalScore = Math.max(50, placementBonus + paceBonus + answerScore + distanceScore);
 
+    if (isRacePvp && playerFinished) {
+      const socket = raceSocketRef.current;
+      if (socket && socket.connected && raceRoomCode) {
+        socket.emit("race:finish", {
+          roomCode: raceRoomCode,
+          winnerName: playerName || "Guest",
+          playerDistance: racePlayerDistance,
+          opponentDistance: raceCpuDistance,
+          endedAt: Date.now(),
+          reason: "finish",
+        });
+      }
+    }
+
     setRaceResult(playerWon ? "win" : "lose");
   setRaceEndReason("finish");
     setRaceFinalScore(finalScore);
@@ -1454,7 +1490,33 @@ export default function App() {
     }
 
     setScreen("raceResult");
-  }, [screen, raceResult, racePlayerDistance, raceCpuDistance, raceStartTs, raceCorrectCount, raceWrongCount, raceLeaderboardSaved, addScore, playerName]);
+  }, [screen, raceResult, racePlayerDistance, raceCpuDistance, raceStartTs, raceCorrectCount, raceWrongCount, raceLeaderboardSaved, addScore, playerName, isRacePvp, raceRoomCode]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || !isRacePvp || raceResult) return;
+    if (!raceHadOpponent || raceOpponentReady || raceSocketStatus !== "waiting") return;
+    setRaceResult("win");
+    setRaceEndReason("forfeit");
+  }, [screen, isRacePvp, raceResult, raceHadOpponent, raceOpponentReady, raceSocketStatus]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || !raceResult || raceFinalScore > 0) return;
+
+    const playerWon = raceResult === "win";
+    const elapsedSeconds = Math.max(1, Math.floor((Date.now() - raceStartTs) / 1000));
+    const placementBonus = playerWon ? 350 : 90;
+    const paceBonus = Math.max(0, 220 - elapsedSeconds * 3);
+    const answerScore = raceCorrectCount * 120 - raceWrongCount * 45;
+    const distanceScore = Math.round((racePlayerDistance / RACE_DISTANCE) * 450);
+    const finalScore = Math.max(50, placementBonus + paceBonus + answerScore + distanceScore);
+
+    setRaceFinalScore(finalScore);
+    if (!raceLeaderboardSaved) {
+      addScore(playerName || "Guest", finalScore);
+      setRaceLeaderboardSaved(true);
+    }
+    setScreen("raceResult");
+  }, [screen, raceResult, raceFinalScore, raceStartTs, raceCorrectCount, raceWrongCount, racePlayerDistance, raceLeaderboardSaved, addScore, playerName]);
 
   useEffect(() => {
     if (screen === "raceGame") return undefined;
@@ -2952,7 +3014,7 @@ export default function App() {
 
       {/* ─── RACE GAME ───────────────────────────────────────────────────── */}
       {screen === "raceGame" && raceQuestion && (
-        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 14px 28px", animation: "fadeUp 0.35s ease" }}>
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 14px 28px", animation: "fadeUp 0.35s ease", position: "relative" }}>
           <div style={{ width: "100%", maxWidth: 980, display: "grid", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <button className="casino-btn" onClick={() => setScreen("intro")} style={{ background: "rgba(255,255,255,0.8)", color: C.text, border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 14px", fontSize: 14 }}>
@@ -3056,6 +3118,58 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {showRacePreMatchOverlay && (
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+              zIndex: 50,
+              pointerEvents: "none",
+              background: "linear-gradient(180deg, rgba(245,237,224,0.28), rgba(245,237,224,0.52))",
+              backdropFilter: "blur(4px)",
+            }}>
+              <div style={{
+                width: "100%",
+                maxWidth: 520,
+                borderRadius: 16,
+                border: `1px solid ${C.border}`,
+                background: "rgba(255,255,255,0.9)",
+                boxShadow: "0 18px 40px rgba(45, 30, 10, 0.16)",
+                padding: "18px 20px",
+                animation: "popIn 0.28s ease",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                  <div style={{ fontSize: 14, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint }}>PvP Matchmaking</div>
+                  <div style={{ fontSize: 12, color: raceRoomStatusInfo.color, background: raceRoomStatusInfo.bg, borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: 1 }}>
+                    {raceRoomStatusInfo.label}
+                  </div>
+                </div>
+
+                <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 22, color: C.text, marginBottom: 6, animation: "neonPulse 1.1s infinite" }}>
+                  {raceSocketStatus === "connecting" ? "Connecting to server…" : "Waiting for second player…"}
+                </div>
+
+                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6, marginBottom: 12 }}>
+                  {raceRoomStatusInfo.message}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.66)", padding: "9px 10px" }}>
+                    <div style={{ fontSize: 10, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Room</div>
+                    <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, color: C.text, letterSpacing: 1 }}>{raceRoomCode || raceRoomInput || "-"}</div>
+                  </div>
+                  <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.66)", padding: "9px 10px" }}>
+                    <div style={{ fontSize: 10, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Players</div>
+                    <div style={{ fontSize: 13, color: C.text, marginTop: 4 }}>{racePlayerLabel} vs {raceOpponentLabel}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
