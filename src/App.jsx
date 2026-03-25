@@ -13,6 +13,7 @@ const RACE_INITIAL_SPEED_GAP = 0;
 const RACE_BASE_PLAYER_SPEED = RACE_BASE_CPU_SPEED + RACE_INITIAL_SPEED_GAP;
 const RACE_MIN_SPEED = 28;
 const RACE_MAX_SPEED = 74;
+const RACE_CPU_RAMP_INTERVAL_MS = 500;
 const BONUS_LIFE_STREAK = 5;
 const PENALTY_PER_WRONG = 30;
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -501,13 +502,40 @@ function shuffleQuestionsInLevels(levels) {
   return levels.map(level => ({ ...level, questions: shuffleArray(level.questions) }));
 }
 
+function getRaceQuestionMeta(question, level) {
+  const haystack = `${level?.name || ""} ${question?.q || ""} ${question?.explanation || ""} ${(question?.options || []).join(" ")}`.toLowerCase();
+  if (/(signal|computed|effect\(|zone\.js|change detection)/.test(haystack)) {
+    return { topicTag: "Signals & Reactivity", paceReward: 14, pacePenalty: 12, timeLimit: 7 };
+  }
+  if (/(rxjs|observable|switchmap|map\(|pipe\(|subject)/.test(haystack)) {
+    return { topicTag: "RxJS Streams", paceReward: 13, pacePenalty: 11, timeLimit: 7 };
+  }
+  if (/(guard|resolver|interceptor|lazy|router|route|canactivate)/.test(haystack)) {
+    return { topicTag: "Routing & Security", paceReward: 12, pacePenalty: 10, timeLimit: 8 };
+  }
+  if (/(injectable|dependency injection|service|httpclient|provider)/.test(haystack)) {
+    return { topicTag: "DI & Services", paceReward: 11, pacePenalty: 10, timeLimit: 8 };
+  }
+  if (/(standalone|component|directive|pipe|ngmodule)/.test(haystack)) {
+    return { topicTag: "Components & Modules", paceReward: 10, pacePenalty: 9, timeLimit: 9 };
+  }
+  return { topicTag: "Angular Core", paceReward: 9, pacePenalty: 8, timeLimit: 9 };
+}
+
 function buildRaceQuestions(levels) {
   const pool = levels.flatMap(level =>
-    level.questions.map(question => ({
-      ...question,
-      zoneName: level.name,
-      zoneIcon: level.icon,
-    }))
+    level.questions.map(question => {
+      const meta = getRaceQuestionMeta(question, level);
+      return {
+        ...question,
+        zoneName: level.name,
+        zoneIcon: level.icon,
+        topicTag: meta.topicTag,
+        paceReward: meta.paceReward,
+        pacePenalty: meta.pacePenalty,
+        raceTimeLimit: meta.timeLimit,
+      };
+    })
   );
   return shuffleArray(pool);
 }
@@ -818,6 +846,7 @@ export default function App() {
   const [raceBoostPulse, setRaceBoostPulse] = useState(0);
   const [raceSlowPulse, setRaceSlowPulse] = useState(0);
   const [raceResult, setRaceResult] = useState(null);
+  const [raceStreak, setRaceStreak] = useState(0);
   const [raceCorrectCount, setRaceCorrectCount] = useState(0);
   const [raceWrongCount, setRaceWrongCount] = useState(0);
   const [raceStartTs, setRaceStartTs] = useState(0);
@@ -960,6 +989,7 @@ export default function App() {
   const level = levels && levelIdx >= 0 && levelIdx < levels.length ? levels[levelIdx] : null;
   const question = level && qIdx >= 0 && qIdx < level.questions.length ? level.questions[qIdx] : null;
   const raceQuestion = raceQuestions.length > 0 ? raceQuestions[raceQuestionIdx % raceQuestions.length] : null;
+  const raceQuestionTimeLimitMax = raceQuestion?.raceTimeLimit || RACE_QUESTION_TIME_LIMIT;
   const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
   const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
 
@@ -1134,6 +1164,7 @@ export default function App() {
     setRaceBoostPulse(0);
     setRaceSlowPulse(0);
     setRaceResult(null);
+    setRaceStreak(0);
     setRaceCorrectCount(0);
     setRaceWrongCount(0);
     setRaceFinalScore(0);
@@ -1147,24 +1178,40 @@ export default function App() {
     if (raceShowFeedback || !raceQuestion || screen !== "raceGame") return;
     if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
     const correct = idx === raceQuestion.answer;
+    const paceReward = raceQuestion.paceReward || 10;
+    const pacePenalty = raceQuestion.pacePenalty || 10;
+    const topicTag = raceQuestion.topicTag || "Angular Core";
     setRacePicked(idx);
     setRaceIsCorrect(correct);
     setRaceShowFeedback(true);
 
     if (correct) {
+      const nextStreak = raceStreak + 1;
+      const comboBoost = Math.min(12, nextStreak * 2);
+      const speedGain = paceReward + comboBoost;
       setRaceCorrectCount(c => c + 1);
-      setRaceFeedbackLabel("Bonne réponse : +10 vitesse joueur");
-      setRacePlayerSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 10));
+      setRaceStreak(nextStreak);
+      setRaceFeedbackLabel(`Correct! ${topicTag} boost +${speedGain} mph (combo x${nextStreak})`);
+      setRacePlayerSpeed(speed => Math.min(RACE_MAX_SPEED, speed + speedGain));
+      setRaceCpuSpeed(speed => Math.max(RACE_MIN_SPEED, speed - Math.min(4, Math.floor(paceReward / 3))));
       setRaceBoostPulse(v => v + 1);
       if (soundEnabled) playTone(930, 0.08, "triangle", 0.03);
     } else if (timedOut) {
+      const timeoutPenalty = pacePenalty + 2;
       setRaceWrongCount(c => c + 1);
-      setRaceFeedbackLabel("Temps écoulé : question passée (pas de pénalité vitesse)");
+      setRaceStreak(0);
+      setRaceFeedbackLabel(`Timeout! ${topicTag} pressure -${timeoutPenalty} mph, CPU +6 mph`);
+      setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - timeoutPenalty));
+      setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 6));
+      setRaceSlowPulse(v => v + 1);
       if (soundEnabled) playTone(380, 0.06, "square", 0.018);
     } else {
+      const wrongPenalty = pacePenalty + 3;
       setRaceWrongCount(c => c + 1);
-      setRaceFeedbackLabel("Mauvaise réponse : -10 vitesse joueur");
-      setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - 10));
+      setRaceStreak(0);
+      setRaceFeedbackLabel(`Wrong! ${topicTag} penalty -${wrongPenalty} mph, CPU +4 mph`);
+      setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - wrongPenalty));
+      setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 4));
       setRaceSlowPulse(v => v + 1);
       if (soundEnabled) playTone(260, 0.1, "sawtooth", 0.025);
     }
@@ -1173,8 +1220,8 @@ export default function App() {
       setRaceShowFeedback(false);
       setRacePicked(null);
       setRaceQuestionIdx(i => i + 1);
-    }, 900);
-  }, [raceShowFeedback, raceQuestion, screen, soundEnabled]);
+    }, 850);
+  }, [raceShowFeedback, raceQuestion, screen, soundEnabled, raceStreak]);
 
   useEffect(() => {
     racePlayerSpeedRef.current = racePlayerSpeed;
@@ -1189,10 +1236,10 @@ export default function App() {
     if (raceShowFeedback) return undefined;
     const startedAt = Date.now();
     setRaceQuestionStartedAt(startedAt);
-    setRaceQuestionTimeLeft(RACE_QUESTION_TIME_LIMIT);
+    setRaceQuestionTimeLeft(raceQuestionTimeLimitMax);
     const id = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-      const left = Math.max(0, RACE_QUESTION_TIME_LIMIT - elapsed);
+      const left = Math.max(0, raceQuestionTimeLimitMax - elapsed);
       setRaceQuestionTimeLeft(left);
       if (left <= 0) {
         clearInterval(id);
@@ -1200,7 +1247,20 @@ export default function App() {
       }
     }, 200);
     return () => clearInterval(id);
-  }, [screen, raceQuestion, raceShowFeedback, raceResult, handleRaceAnswer]);
+  }, [screen, raceQuestion, raceShowFeedback, raceResult, handleRaceAnswer, raceQuestionTimeLimitMax]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || raceResult) return undefined;
+    const id = setInterval(() => {
+      const lead = racePlayerDistance - raceCpuDistance;
+      const progressPressure = (raceQuestionIdx / Math.max(1, raceQuestions.length || 1)) * 10;
+      const leadPressure = lead > 0 ? Math.min(12, lead / 18) : Math.max(-6, lead / 35);
+      const errorPressure = Math.max(0, (raceWrongCount * 1.4) - raceCorrectCount * 0.35);
+      const target = Math.max(RACE_MIN_SPEED + 2, Math.min(RACE_MAX_SPEED - 1, RACE_BASE_CPU_SPEED + progressPressure + leadPressure + errorPressure));
+      setRaceCpuSpeed(speed => speed + (target - speed) * 0.32);
+    }, RACE_CPU_RAMP_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [screen, raceResult, racePlayerDistance, raceCpuDistance, raceQuestionIdx, raceQuestions.length, raceWrongCount, raceCorrectCount]);
 
   useEffect(() => {
     if (screen !== "raceGame" || raceResult) return undefined;
@@ -2665,7 +2725,8 @@ export default function App() {
                 <div style={{ fontSize: 12, color: C.faint }}>Question {raceQuestionIdx + 1}</div>
                 <div style={{ fontSize: 12, color: C.faint }}>✅ {raceCorrectCount}</div>
                 <div style={{ fontSize: 12, color: C.faint }}>❌ {raceWrongCount}</div>
-                <TimerRing value={raceQuestionTimeLeft} max={RACE_QUESTION_TIME_LIMIT} />
+                <div style={{ fontSize: 12, color: C.faint }}>🔥 Combo {raceStreak}</div>
+                <TimerRing value={raceQuestionTimeLeft} max={raceQuestionTimeLimitMax} />
               </div>
             </div>
 
@@ -2694,11 +2755,16 @@ export default function App() {
               </div>
             </div>
 
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -2, marginBottom: 2, fontSize: 12, color: C.muted }}>
+              <span>Angular Topic: <b style={{ color: C.text }}>{raceQuestion.topicTag || "Angular Core"}</b></span>
+              <span>Question Timer: <b style={{ color: C.text }}>{raceQuestionTimeLimitMax}s</b></span>
+            </div>
+
             <div className="felt-table" style={{ borderRadius: 16, padding: "16px 18px" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
                 <div style={{ fontSize: 24 }}>{raceQuestion.zoneIcon || "🏁"}</div>
                 <div>
-                  <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Question Zone</div>
+                  <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Angular Challenge Node</div>
                   <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, color: C.text, fontSize: 15 }}>{raceQuestion.zoneName || "Angular"}</div>
                 </div>
               </div>

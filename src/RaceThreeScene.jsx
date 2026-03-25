@@ -1,553 +1,415 @@
-import { Suspense, useEffect, useMemo, useRef } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Sky, Stars, Text, useGLTF } from "@react-three/drei";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-const PLAYER_MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Buggy/glTF/Buggy.gltf";
-const CPU_MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/ToyCar/glTF/ToyCar.gltf";
-const TRACK_LENGTH = 120;
+const TRACK_LENGTH = 110;
+const FINISH_Z = 102;
+const PLAYER_LANE_X = -2.2;
+const CPU_LANE_X = 2.2;
+const SPEED_DISPLAY_FACTOR = 16;
 
-function Road({ scrollSpeed = 1 }) {
-  const laneRef = useRef(null);
-
-  useFrame((state) => {
-    if (!laneRef.current) return;
-    const t = state.clock.getElapsedTime();
-    laneRef.current.position.z = ((t * 22 * scrollSpeed) % 6) - 3;
-  });
-
-  return (
-    <group>
-      <mesh rotation-x={-Math.PI / 2} position={[0, -0.02, TRACK_LENGTH * 0.5 - 6]} receiveShadow>
-        <planeGeometry args={[12, TRACK_LENGTH]} />
-        <meshStandardMaterial
-          color="#0f1a30"
-          emissive="#1a2a4a"
-          emissiveIntensity={0.15}
-          roughness={0.88}
-          metalness={0.05}
-          envMapIntensity={0.6}
-        />
-      </mesh>
-
-      <mesh rotation-x={-Math.PI / 2} position={[0, -0.015, TRACK_LENGTH * 0.5 - 6]} ref={laneRef}>
-        <planeGeometry args={[0.35, TRACK_LENGTH + 12]} />
-        <meshStandardMaterial
-          color="#ffffff"
-          emissive="#4db8ff"
-          emissiveIntensity={0.55}
-          metalness={0.3}
-          roughness={0.25}
-        />
-      </mesh>
-
-      <mesh rotation-x={-Math.PI / 2} position={[-6.1, -0.01, TRACK_LENGTH * 0.5 - 6]}>
-        <planeGeometry args={[0.2, TRACK_LENGTH]} />
-        <meshStandardMaterial
-          color="#ff9d3d"
-          emissive="#ff7a1f"
-          emissiveIntensity={0.35}
-          metalness={0.35}
-          roughness={0.35}
-        />
-      </mesh>
-      <mesh rotation-x={-Math.PI / 2} position={[6.1, -0.01, TRACK_LENGTH * 0.5 - 6]}>
-        <planeGeometry args={[0.2, TRACK_LENGTH]} />
-        <meshStandardMaterial
-          color="#ff9d3d"
-          emissive="#ff7a1f"
-          emissiveIntensity={0.35}
-          metalness={0.35}
-          roughness={0.35}
-        />
-      </mesh>
-
-      <mesh position={[0, 2.4, TRACK_LENGTH - 7]} castShadow>
-        <boxGeometry args={[12.5, 0.25, 0.7]} />
-        <meshStandardMaterial
-          color="#ffffff"
-          emissive="#8ba3ff"
-          emissiveIntensity={0.45}
-          metalness={0.5}
-          roughness={0.15}
-        />
-      </mesh>
-
-      {Array.from({ length: 16 }).map((_, i) => (
-        <mesh key={i} position={[-5.8 + i * 0.78, 2.1, TRACK_LENGTH - 7]} castShadow>
-          <sphereGeometry args={[0.08, 16, 16]} />
-          <meshStandardMaterial
-            color={i % 2 ? "#ff6b5a" : "#ffd266"}
-            emissive={i % 2 ? "#ff6b5a" : "#ffd266"}
-            emissiveIntensity={1.0}
-            metalness={0.4}
-            roughness={0.2}
-          />
-        </mesh>
-      ))}
-
-      {Array.from({ length: 40 }).map((_, i) => (
-        <mesh key={`lane-${i}`} rotation-x={-Math.PI / 2} position={[0, 0.01, i * 3 - 6]} castShadow>
-          <boxGeometry args={[0.1, 0.3, 0.2]} />
-          <meshStandardMaterial
-            color="#ffffff"
-            emissive="#7ea1ff"
-            emissiveIntensity={0.4}
-            metalness={0.25}
-            roughness={0.15}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-function TrailDots({ laneX, progress, color = "#70f5d1" }) {
-  const dotsRef = useRef([]);
-
-  useFrame((state) => {
-    const time = state.clock.getElapsedTime();
-    dotsRef.current.forEach((dot, index) => {
-      if (!dot) return;
-      const zBase = (progress / 100) * (TRACK_LENGTH - 10);
-      const offset = ((time * 10 + index * 1.7) % 9) - 9;
-      dot.position.set(laneX + Math.sin(time * 3 + index) * 0.08, 0.42, zBase + offset);
-      dot.scale.setScalar(1 - (index / 18) * 0.55);
-      dot.material.opacity = 0.9 - index * 0.04;
-    });
-  });
-
-  return (
-    <group>
-      {Array.from({ length: 16 }).map((_, i) => (
-        <mesh key={i} ref={(node) => { dotsRef.current[i] = node; }}>
-          <sphereGeometry args={[0.07, 8, 8]} />
-          <meshStandardMaterial
-            color={color}
-            emissive={color}
-            emissiveIntensity={0.75}
-            transparent
-            opacity={0.8}
-            metalness={0.1}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-function DustParticles({ laneX, progress, speed }) {
-  const particlesRef = useRef([]);
-  const particleCount = 12;
-
-  useFrame((state) => {
-    const time = state.clock.getElapsedTime();
-    const zBase = (progress / 100) * (TRACK_LENGTH - 10);
-
-    particlesRef.current.forEach((particle, index) => {
-      if (!particle) return;
-      const phase = (time * 5 + index) % 1;
-      particle.position.set(
-        laneX + (Math.random() - 0.5) * 0.6 + Math.sin(time * 2 + index) * 0.15,
-        0.15 + Math.sin(time * 3 + index) * 0.1,
-        zBase + (phase * -2)
-      );
-      particle.scale.setScalar(0.3 + Math.sin(time * 4 + index) * 0.1);
-      particle.material.opacity = Math.max(0, 1 - phase * 1.2);
-    });
-  });
-
-  return (
-    <group>
-      {Array.from({ length: particleCount }).map((_, i) => (
-        <mesh key={i} ref={(node) => { particlesRef.current[i] = node; }}>
-          <sphereGeometry args={[0.06, 6, 6]} />
-          <meshStandardMaterial
-            color="#d4a574"
-            emissive="#8b6f47"
-            emissiveIntensity={0.4}
-            transparent
-            opacity={0.5}
-          />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-function CarAura({ laneX, progress, color = "#4ad6b7", intensity = 0.45 }) {
-  const auraRef = useRef(null);
-
-  useFrame((state) => {
-    if (!auraRef.current) return;
-    const t = state.clock.getElapsedTime();
-    const z = (progress / 100) * (TRACK_LENGTH - 10);
-    auraRef.current.position.set(laneX, 0.03, z - 0.15);
-    const pulse = 1 + Math.sin(t * 6) * 0.12;
-    auraRef.current.scale.set(pulse, pulse, pulse);
-    auraRef.current.material.opacity = intensity + Math.sin(t * 8) * 0.12;
-  });
-
-  return (
-    <mesh ref={auraRef} rotation-x={-Math.PI / 2}>
-      <ringGeometry args={[0.42, 1.2, 48]} />
-      <meshStandardMaterial
-        color={color}
-        emissive={color}
-        emissiveIntensity={0.7}
-        transparent
-        opacity={intensity}
-        metalness={0.2}
-      />
-    </mesh>
-  );
-}
-
-function RacerLabel({ laneX, progress, label, color = "#ffffff" }) {
-  const labelRef = useRef(null);
-
-  useFrame((state) => {
-    if (!labelRef.current) return;
-    const z = (progress / 100) * (TRACK_LENGTH - 10);
-    labelRef.current.position.set(laneX, 1.42, z - 0.1);
-    labelRef.current.quaternion.copy(state.camera.quaternion);
-  });
-
-  return (
-    <Text
-      ref={labelRef}
-      fontSize={0.48}
-      color={color}
-      anchorX="center"
-      anchorY="middle"
-      outlineWidth={0.035}
-      outlineColor="#0a0f1a"
-      letterSpacing={0.08}
-    >
-      {label}
-    </Text>
-  );
-}
-
-function CarModel({ modelUrl, laneX, progress, tint = "#4ad6b7", glow = "#4ad6b7", speed = 40, boost = false, sizeFactor = 1 }) {
-  const group = useRef(null);
-  const { scene } = useGLTF(modelUrl);
-  const cloned = useMemo(() => scene.clone(true), [scene]);
-  const scale = useMemo(() => {
-    const bounds = new THREE.Box3().setFromObject(cloned);
-    const size = new THREE.Vector3();
-    bounds.getSize(size);
-    const longestSide = Math.max(size.x, size.y, size.z) || 1;
-    return (2.1 / longestSide) * sizeFactor;
-  }, [cloned, sizeFactor]);
+export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, playerSpeed = 40, cpuSpeed = 40 }) {
+  const containerRef = useRef(null);
+  const playerProgressRef = useRef(playerProgress);
+  const cpuProgressRef = useRef(cpuProgress);
+  const playerSpeedRef = useRef(playerSpeed);
+  const cpuSpeedRef = useRef(cpuSpeed);
 
   useEffect(() => {
-    cloned.traverse((child) => {
-      if (!child.isMesh || !child.material) return;
-      const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.forEach((material, idx) => {
-        const nextMaterial = material.clone();
-        if (nextMaterial.color) nextMaterial.color.lerp(new THREE.Color(tint), 0.5);
-        if (nextMaterial.emissive) {
-          nextMaterial.emissive.set(glow);
-          nextMaterial.emissiveIntensity = boost ? 0.35 : 0.15;
-        }
-        // Enhanced Bruno Simon style material properties
-        nextMaterial.roughness = Math.max(0.08, (nextMaterial.roughness || 0.8) * 0.5);
-        nextMaterial.metalness = Math.min(0.85, (nextMaterial.metalness || 0) + 0.5);
-        nextMaterial.envMapIntensity = 1.2;
+    playerProgressRef.current = playerProgress;
+    cpuProgressRef.current = cpuProgress;
+    playerSpeedRef.current = playerSpeed;
+    cpuSpeedRef.current = cpuSpeed;
+  }, [playerProgress, cpuProgress, playerSpeed, cpuSpeed]);
 
-        // Add realistic reflection
-        if (!nextMaterial.map) {
-          nextMaterial.side = THREE.DoubleSide;
-        }
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-        mats[idx] = nextMaterial;
-      });
-      child.material = Array.isArray(child.material) ? mats : mats[0];
-      child.castShadow = true;
-      child.receiveShadow = true;
+    // ── SETUP ──────────────────────────────────────────────────
+    const cont = containerRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.id = "rc";
+    canvas.style.cssText = "display:block;position:absolute;inset:0;width:100%;height:100%;";
+
+    const gameDiv = document.createElement("div");
+    gameDiv.style.cssText = "position:relative;width:100%;height:100%;background:#1b3e58;overflow:hidden;";
+    gameDiv.appendChild(canvas);
+    cont.innerHTML = "";
+    cont.appendChild(gameDiv);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 180);
+    camera.position.set(0, 5, -6);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color("#1b3e58");
+    scene.fog = new THREE.Fog("#1b3e58", 65, 145);
+
+    function resize() {
+      const W = gameDiv.clientWidth;
+      const H = gameDiv.clientHeight;
+      renderer.setSize(W, H);
+      camera.aspect = W / H;
+      camera.updateProjectionMatrix();
+    }
+    resize();
+    window.addEventListener("resize", resize);
+
+    // ── MATERIALS ──────────────────────────────────────────────
+    const M = (c) => new THREE.MeshToonMaterial({ color: c });
+    const ME = (c, i = 0.5) => new THREE.MeshToonMaterial({ color: c, emissive: c, emissiveIntensity: i });
+    const MT = (c, o = 0.8) => new THREE.MeshToonMaterial({ color: c, transparent: true, opacity: o });
+
+    // ── LIGHTS ────────────────────────────────────────────────
+    scene.add(new THREE.AmbientLight(0xffffff, 0.72));
+    const sun = new THREE.DirectionalLight(0xffeedd, 1.25);
+    sun.position.set(8, 18, 10);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, far: 55 });
+    scene.add(sun);
+
+    const fill = new THREE.DirectionalLight(0x7799ff, 0.32);
+    fill.position.set(-8, 5, -10);
+    scene.add(fill);
+
+    const backLight = new THREE.DirectionalLight(0x4488aa, 0.2);
+    backLight.position.set(0, 3, -20);
+    scene.add(backLight);
+
+    // ── ROAD ───────────────────────────────────────────────────
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(9.4, TRACK_LENGTH + 12), M("#22223a"));
+    road.rotation.x = -Math.PI / 2;
+    road.position.set(0, 0, TRACK_LENGTH / 2);
+    road.receiveShadow = true;
+    scene.add(road);
+
+    const gMat = M("#286b1a");
+    for (const sx of [-1, 1]) {
+      const g = new THREE.Mesh(new THREE.PlaneGeometry(42, TRACK_LENGTH + 12), gMat);
+      g.rotation.x = -Math.PI / 2;
+      g.position.set(sx * 25, -0.01, TRACK_LENGTH / 2);
+      g.receiveShadow = true;
+      scene.add(g);
+    }
+
+    const yMat = M("#ddb820");
+    for (const sx of [-1, 1]) {
+      const s = new THREE.Mesh(new THREE.PlaneGeometry(0.22, TRACK_LENGTH + 12), yMat);
+      s.rotation.x = -Math.PI / 2;
+      s.position.set(sx * 4.58, 0.01, TRACK_LENGTH / 2);
+      scene.add(s);
+    }
+
+    const dMat = M("#dde8f5");
+    const ND = 30;
+    for (let i = 0; i < ND; i++) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 1.4), dMat);
+      d.rotation.x = -Math.PI / 2;
+      d.position.set(0, 0.01, (i * (TRACK_LENGTH / ND)) + 0.5);
+      scene.add(d);
+    }
+
+    // Start line
+    const wMat = M("#f0f0f0");
+    const sl = new THREE.Mesh(new THREE.PlaneGeometry(9.2, 0.55), wMat);
+    sl.rotation.x = -Math.PI / 2;
+    sl.position.set(0, 0.02, 1.8);
+    scene.add(sl);
+
+    // Finish line
+    for (let i = 0; i < 9; i++) {
+      for (let j = 0; j < 2; j++) {
+        if ((i + j) % 2 === 0) {
+          const t = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.85), wMat);
+          t.rotation.x = -Math.PI / 2;
+          t.position.set(-4 + i, 0.02, FINISH_Z + (j - 0.5) * 0.85);
+          scene.add(t);
+        }
+      }
+    }
+
+    // Finish arch
+    const archRM = M("#cc2020");
+    const archYM = M("#f5c200");
+    const pGeo = new THREE.BoxGeometry(0.28, 5.6, 0.28);
+    for (const sx of [-1, 1]) {
+      const p = new THREE.Mesh(pGeo, archRM);
+      p.position.set(sx * 5.1, 2.8, FINISH_Z + 0.35);
+      p.castShadow = true;
+      scene.add(p);
+    }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(10.6, 0.38, 0.3), archYM);
+    bar.position.set(0, 5.6, FINISH_Z + 0.35);
+    bar.castShadow = true;
+    scene.add(bar);
+
+    for (let i = 0; i < 8; i++) {
+      const fc = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.34, 0.05), M(i % 2 ? "#111" : "#eee"));
+      fc.position.set(-4.2 + i * 1.2, 5.6, FINISH_Z + 0.5);
+      scene.add(fc);
+    }
+
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(5, 0.6, 0.08), M("#ffcc22"));
+    sign.position.set(0, 6.6, FINISH_Z + 0.35);
+    scene.add(sign);
+
+    // Lamps
+    const lpM = M("#5a6e7a");
+    const lbM = ME("#ffeea0", 0.65);
+    const lpG = new THREE.CylinderGeometry(0.07, 0.1, 3.8, 5);
+    const lbG = new THREE.SphereGeometry(0.2, 5, 5);
+    for (let i = 0; i < 15; i++) {
+      const z = (i * (TRACK_LENGTH / 14)) + 1;
+      for (const sx of [-1, 1]) {
+        const lp = new THREE.Mesh(lpG, lpM);
+        lp.position.set(sx * 5.4, 1.9, z);
+        lp.castShadow = true;
+        scene.add(lp);
+
+        const lb = new THREE.Mesh(lbG, lbM);
+        lb.position.set(sx * 5.4, 3.85, z);
+        scene.add(lb);
+
+        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 4), lpM);
+        arm.rotation.z = Math.PI / 2;
+        arm.position.set(sx * (5.4 - sx * 0.3), 3.75, z);
+        scene.add(arm);
+      }
+    }
+
+    // Trees
+    const trM = M("#4f2e14");
+    const lfMs = [M("#246218"), M("#2f7622"), M("#1a5514")];
+    const trG = new THREE.CylinderGeometry(0.17, 0.28, 2, 5);
+    const lfG = new THREE.ConeGeometry(1.5, 3.2, 6);
+    [
+      [-11, 4], [-15, 18], [-10, 32], [-14, 47], [-11, 61], [-15, 76], [-10, 90], [-14, 105],
+      [10, 7], [14, 21], [11, 36], [14, 51], [12, 66], [10, 81], [14, 96], [11, 108],
+    ].forEach(([x, z], i) => {
+      const tr = new THREE.Mesh(trG, trM);
+      tr.position.set(x, 1, z);
+      tr.castShadow = true;
+      scene.add(tr);
+
+      const lf = new THREE.Mesh(lfG, lfMs[i % 3]);
+      lf.position.set(x, 3.7, z);
+      lf.castShadow = true;
+      scene.add(lf);
     });
-  }, [cloned, tint, glow, boost]);
 
-  useFrame((state) => {
-    if (!group.current) return;
-    const t = state.clock.getElapsedTime();
-    const z = (progress / 100) * (TRACK_LENGTH - 10);
-    const bob = 0.26 + Math.sin(t * (boost ? 8 : 5)) * (boost ? 0.02 : 0.01);
-    group.current.position.set(laneX, bob, z);
-    group.current.rotation.set(0, Math.PI, Math.sin(t * 4) * (boost ? 0.03 : 0.015));
-  });
+    // Crowd
+    const cCols = ["#e74c3c", "#3ecec6", "#f39c12", "#9b59b6", "#2ecc71", "#e91e63", "#3498db", "#ff6b35"];
+    const hdG = new THREE.SphereGeometry(0.18, 5, 4);
+    const skG = new THREE.BoxGeometry(0.38, 0.75, 0.28);
+    for (let i = 0; i < 55; i++) {
+      const col = cCols[i % cCols.length];
+      const sx = i % 2 ? -1 : 1;
+      const sk = new THREE.Mesh(skG, M(col));
+      sk.position.set(sx * (6.2 + Math.random() * 5.5), 0.375, Math.random() * TRACK_LENGTH);
+      sk.castShadow = true;
+      scene.add(sk);
 
-  return (
-    <group ref={group} scale={scale} castShadow receiveShadow>
-      <primitive object={cloned} />
-    </group>
-  );
-}
-
-function PreRaceCountdown({ isActive, elapsedTime }) {
-  const textRef = useRef(null);
-  const torusRef = useRef(null);
-
-  useFrame((state) => {
-    if (!isActive) return;
-    const t = state.clock.getElapsedTime();
-
-    if (textRef.current) {
-      const scale = 1 + Math.sin(t * 6) * 0.08;
-      textRef.current.scale.set(scale, scale, scale);
-      textRef.current.rotation.z = Math.sin(t * 2) * 0.02;
+      const hd = new THREE.Mesh(hdG, M("#f0d0a0"));
+      hd.position.set(sk.position.x, sk.position.y + 0.55, sk.position.z);
+      scene.add(hd);
     }
 
-    if (torusRef.current) {
-      torusRef.current.rotation.z += 0.015;
-      torusRef.current.material.opacity = Math.max(0, 1 - t / 3);
+    // ── CARS ───────────────────────────────────────────────────
+    function buildCar(bC, aC) {
+      const g = new THREE.Group();
+      const BM = M(bC);
+      const AM = M(aC);
+      const GM = MT("#2a3a55", 0.78);
+      const HM = ME("#ffffaa", 0.75);
+      const TM = ME("#ff1100", 0.65);
+      const WM = M("#161628");
+      const RM = M("#aabbcc");
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.5, 3.2), BM);
+      body.position.y = 0.58;
+      body.castShadow = true;
+      g.add(body);
+
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.48, 1.8), BM);
+      cab.position.set(0, 1.07, 0.06);
+      cab.castShadow = true;
+      g.add(cab);
+
+      const wsG = new THREE.BoxGeometry(1.3, 0.4, 0.06);
+      for (const [z] of [[0.97], [-0.81]]) {
+        const ws = new THREE.Mesh(wsG, GM);
+        ws.position.set(0, 1.06, z);
+        g.add(ws);
+      }
+
+      const swG = new THREE.BoxGeometry(0.06, 0.36, 1.28);
+      for (const sx of [-0.69, 0.69]) {
+        const sw = new THREE.Mesh(swG, GM);
+        sw.position.set(sx, 1.06, 0.1);
+        g.add(sw);
+      }
+
+      const hood = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 1.12), BM);
+      hood.position.set(0, 0.84, 1.1);
+      g.add(hood);
+
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.07, 0.42), AM);
+      sp.position.set(0, 1.5, -1.28);
+      g.add(sp);
+
+      for (const sx of [-0.62, 0.62]) {
+        const sl = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.1), AM);
+        sl.position.set(sx, 1.3, -1.28);
+        g.add(sl);
+      }
+
+      const bump = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.14, 0.1), AM);
+      bump.position.set(0, 0.38, 1.67);
+      g.add(bump);
+
+      const rbump = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.12, 0.1), BM);
+      rbump.position.set(0, 0.36, -1.67);
+      g.add(rbump);
+
+      const ltG = new THREE.BoxGeometry(0.38, 0.15, 0.07);
+      for (const sx of [-0.56, 0.56]) {
+        const h = new THREE.Mesh(ltG, HM);
+        h.position.set(sx, 0.64, 1.63);
+        g.add(h);
+
+        const t = new THREE.Mesh(ltG, TM);
+        t.position.set(sx, 0.64, -1.63);
+        g.add(t);
+      }
+
+      g.userData.wheels = [];
+      const wG = new THREE.CylinderGeometry(0.3, 0.3, 0.24, 10);
+      const rG = new THREE.CylinderGeometry(0.15, 0.15, 0.25, 8);
+
+      [
+        [-0.95, 0.3, 1.02],
+        [0.95, 0.3, 1.02],
+        [-0.95, 0.3, -1.02],
+        [0.95, 0.3, -1.02],
+      ].forEach(([x, y, z]) => {
+        const wh = new THREE.Mesh(wG, WM);
+        wh.position.set(x, y, z);
+        wh.rotation.z = Math.PI / 2;
+        wh.castShadow = true;
+        g.add(wh);
+
+        const rm = new THREE.Mesh(rG, RM);
+        rm.position.set(x, y, z);
+        rm.rotation.z = Math.PI / 2;
+        g.add(rm);
+
+        g.userData.wheels.push(wh);
+      });
+
+      const ugM = new THREE.MeshToonMaterial({
+        color: bC,
+        emissive: bC,
+        emissiveIntensity: 0.25,
+        transparent: true,
+        opacity: 0.3,
+      });
+      const ug = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.7), ugM);
+      ug.rotation.x = Math.PI / 2;
+      ug.position.y = 0.1;
+      g.add(ug);
+
+      g.userData.glowMat = ugM;
+      g.userData.bodyMat = BM;
+
+      return g;
     }
-  });
 
-  if (isActive) {
-    const t = elapsedTime;
-    const count = Math.ceil(Math.max(0, 3 - t));
+    const pMesh = buildCar("#3ecec6", "#1fada6");
+    pMesh.position.set(PLAYER_LANE_X, 0, 0);
+    scene.add(pMesh);
 
-    return (
-      <>
-        <Text
-          ref={textRef}
-          position={[0, 2.5, 0]}
-          fontSize={2.8}
-          color={count === 3 ? "#ff6b6b" : count === 2 ? "#ffd77a" : "#52ffe0"}
-          anchorX="center"
-          anchorY="middle"
-          font="https://fonts.googleapis.com/css2?family=Inter:wght@900&display=swap"
-          outlineWidth={0.15}
-          outlineColor="#0a0f1a"
-          letterSpacing={0.2}
-        >
-          {count > 0 ? count : "GO!"}
-        </Text>
+    const cMesh = buildCar("#ff5835", "#cc3515");
+    cMesh.position.set(CPU_LANE_X, 0, 0);
+    scene.add(cMesh);
 
-        <mesh ref={torusRef} position={[0, 1.5, 0]}>
-          <torusGeometry args={[2, 0.15, 32, 100]} />
-          <meshStandardMaterial
-            color="#52ffe0"
-            emissive="#52ffe0"
-            emissiveIntensity={0.6}
-            transparent
-            opacity={Math.max(0, 1 - t / 3)}
-          />
-        </mesh>
-      </>
-    );
-  }
+    // ── ANIMATION LOOP ────────────────────────────────────────
+    let rafId = 0;
+    let lastTime = performance.now();
+    let elapsedTime = 0;
+    let wRot = 0;
+    let pZRender = (playerProgressRef.current / 100) * FINISH_Z;
+    let cZRender = (cpuProgressRef.current / 100) * FINISH_Z;
+    let pSpeedRender = playerSpeedRef.current;
+    let cSpeedRender = cpuSpeedRef.current;
 
-  return null;
-}
+    function animate() {
+      rafId = requestAnimationFrame(animate);
 
-function AdvancedLighting() {
-  const spotLightRef = useRef(null);
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      elapsedTime += dt;
+      lastTime = now;
 
-  useFrame((state) => {
-    if (spotLightRef.current) {
-      spotLightRef.current.position.x = Math.sin(state.clock.getElapsedTime() * 0.3) * 8;
+      const currentPlayerProgress = playerProgressRef.current;
+      const currentCpuProgress = cpuProgressRef.current;
+      const currentPlayerSpeed = playerSpeedRef.current;
+      const currentCpuSpeed = cpuSpeedRef.current;
+
+      const pZTarget = (currentPlayerProgress / 100) * FINISH_Z;
+      const cZTarget = (currentCpuProgress / 100) * FINISH_Z;
+      const posLerp = 1 - Math.exp(-dt * 14);
+      const speedLerp = 1 - Math.exp(-dt * 10);
+      pZRender += (pZTarget - pZRender) * posLerp;
+      cZRender += (cZTarget - cZRender) * posLerp;
+      pSpeedRender += (currentPlayerSpeed - pSpeedRender) * speedLerp;
+      cSpeedRender += (currentCpuSpeed - cSpeedRender) * speedLerp;
+      const t = elapsedTime;
+
+      // Player car movement
+      const pWobX = Math.sin(t * 9) * 0.02;
+      const pBobY = Math.abs(Math.sin(t * 14)) * 0.023;
+      pMesh.position.set(PLAYER_LANE_X + pWobX, pBobY, pZRender);
+      pMesh.rotation.y = Math.sin(t * 6) * 0.016;
+      pMesh.rotation.z = Math.sin(t * 8) * 0.01;
+
+      // CPU car movement
+      cMesh.position.set(CPU_LANE_X + Math.sin(t * 8 + 1.3) * 0.013, Math.abs(Math.sin(t * 13 + 0.5)) * 0.023, cZRender);
+      cMesh.rotation.y = Math.sin(t * 5) * 0.012;
+
+      // Wheel rotation
+      wRot += pSpeedRender * dt * 1.8;
+      pMesh.userData.wheels.forEach((w) => (w.rotation.x = wRot));
+      if (pSpeedRender > 0) {
+        const cWR = wRot * (cSpeedRender / Math.max(0.1, pSpeedRender));
+        cMesh.userData.wheels.forEach((w) => (w.rotation.x = cWR));
+      }
+
+      // Glow pulse
+      pMesh.userData.glowMat.emissiveIntensity = 0.22 + Math.sin(t * 8) * 0.08;
+
+      // Camera follow
+      const camTY = 5;
+      const camTZ = pZRender - 6;
+      camera.position.x += (0 - camera.position.x) * 0.06;
+      camera.position.y += (camTY - camera.position.y) * 0.045;
+      camera.position.z += (camTZ - camera.position.z) * 0.1;
+      camera.lookAt(0, 0.7, pZRender + 9.5);
+
+      renderer.render(scene, camera);
     }
-  });
 
-  return (
-    <>
-      {/* Key light - main directional */}
-      <directionalLight
-        position={[8, 16, 12]}
-        intensity={1.4}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-left={-50}
-        shadow-camera-right={50}
-        shadow-camera-top={50}
-        shadow-camera-bottom={-50}
-        shadow-camera-near={0.5}
-        shadow-camera-far={200}
-      />
+    animate();
 
-      {/* Fill light */}
-      <directionalLight position={[-8, 12, -10]} intensity={0.6} />
+    return () => {
+      window.removeEventListener("resize", resize);
+      cancelAnimationFrame(rafId);
+      renderer.dispose();
+    };
+  }, []);
 
-      {/* Rim light */}
-      <directionalLight position={[0, 4, -20]} intensity={0.8} color="#5a9aff" />
-
-      {/* Ambient light - soft global illumination */}
-      <ambientLight intensity={0.65} color="#ffffff" />
-
-      {/* Point lights for track illumination */}
-      <pointLight position={[-6.5, 2.2, 30]} intensity={0.4} color="#ffaa44" />
-      <pointLight position={[6.5, 2.2, 30]} intensity={0.4} color="#ffaa44" />
-
-      {/* Dynamic spotlight */}
-      <spotLight
-        ref={spotLightRef}
-        position={[0, 12, 20]}
-        intensity={0.5}
-        angle={Math.PI / 6}
-        penumbra={0.5}
-        color="#ffffff"
-        castShadow
-      />
-    </>
-  );
+  return <div ref={containerRef} style={{ width: "100%", height: "360px", background: "#1b3e58", borderRadius: "12px", overflow: "hidden" }} />;
 }
-
-function Scene({ playerProgress, cpuProgress, playerSpeed, cpuSpeed, boostPulse, slowPulse }) {
-  const avgSpeed = ((playerSpeed + cpuSpeed) * 0.5) / 52;
-  const isRaceActive = playerProgress > 0;
-  const elapsedTimeRef = useRef(0);
-
-  useFrame((state) => {
-    elapsedTimeRef.current = state.clock.getElapsedTime();
-    const playerZ = (playerProgress / 100) * (TRACK_LENGTH - 10);
-    const desiredX = 0;
-
-    if (!isRaceActive) {
-      const desiredY = 6.5;
-      const desiredZ = -8;
-      state.camera.position.x += (desiredX - state.camera.position.x) * 0.06;
-      state.camera.position.y += (desiredY - state.camera.position.y) * 0.06;
-      state.camera.position.z += (desiredZ - state.camera.position.z) * 0.06;
-      state.camera.lookAt(0, 0.5, 5);
-    } else {
-      const desiredY = 8.8;
-      const desiredZ = playerZ - 12;
-      state.camera.position.x += (desiredX - state.camera.position.x) * 0.08;
-      state.camera.position.y += (desiredY - state.camera.position.y) * 0.08;
-      state.camera.position.z += (desiredZ - state.camera.position.z) * 0.12;
-      state.camera.lookAt(0, 0.8, playerZ + 10);
-    }
-  });
-
-  return (
-    <>
-      <Road scrollSpeed={avgSpeed} />
-
-      <CarModel
-        modelUrl={PLAYER_MODEL_URL}
-        laneX={-2.2}
-        progress={playerProgress}
-        tint="#4ce2c1"
-        glow="#52ffe0"
-        speed={playerSpeed}
-        boost={boostPulse > slowPulse}
-        sizeFactor={1.06}
-      />
-      <CarAura laneX={-2.2} progress={playerProgress} color="#4ce2c1" intensity={0.52} />
-      <RacerLabel laneX={-2.2} progress={playerProgress} label="PLAYER" color="#4ce2c1" />
-      <TrailDots laneX={-2.2} progress={playerProgress} color="#4ce2c1" />
-      {isRaceActive && <DustParticles laneX={-2.2} progress={playerProgress} speed={playerSpeed} />}
-
-      <CarModel
-        modelUrl={CPU_MODEL_URL}
-        laneX={2.2}
-        progress={cpuProgress}
-        tint="#ffa35b"
-        glow="#ff7a45"
-        speed={cpuSpeed}
-        sizeFactor={1}
-      />
-      <CarAura laneX={2.2} progress={cpuProgress} color="#ff9d64" intensity={0.44} />
-      <RacerLabel laneX={2.2} progress={cpuProgress} label="CPU" color="#ff9d64" />
-      <TrailDots laneX={2.2} progress={cpuProgress} color="#ff9d64" />
-      {isRaceActive && <DustParticles laneX={2.2} progress={cpuProgress} speed={cpuSpeed} />}
-
-      {Array.from({ length: 18 }).map((_, i) => (
-        <group key={i} position={[-6.05, 0.28, i * 6.4 - 6]}>
-          <mesh position={[0, 0.75, 0]} castShadow receiveShadow>
-            <boxGeometry args={[0.12, 1.4, 0.12]} />
-            <meshStandardMaterial
-              color="#6b7aa5"
-              metalness={0.65}
-              roughness={0.3}
-            />
-          </mesh>
-          <mesh position={[0.05, 1.35, 0]} castShadow>
-            <sphereGeometry args={[0.16, 16, 16]} />
-            <meshStandardMaterial
-              color="#ffbb33"
-              emissive="#ffbb33"
-              emissiveIntensity={0.65}
-              metalness={0.3}
-              roughness={0.25}
-            />
-          </mesh>
-        </group>
-      ))}
-
-      {Array.from({ length: 18 }).map((_, i) => (
-        <group key={`r-${i}`} position={[6.05, 0.28, i * 6.4 - 6]}>
-          <mesh position={[0, 0.75, 0]} castShadow receiveShadow>
-            <boxGeometry args={[0.12, 1.4, 0.12]} />
-            <meshStandardMaterial
-              color="#6b7aa5"
-              metalness={0.65}
-              roughness={0.3}
-            />
-          </mesh>
-          <mesh position={[-0.05, 1.35, 0]} castShadow>
-            <sphereGeometry args={[0.16, 16, 16]} />
-            <meshStandardMaterial
-              color="#ffbb33"
-              emissive="#ffbb33"
-              emissiveIntensity={0.65}
-              metalness={0.3}
-              roughness={0.25}
-            />
-          </mesh>
-        </group>
-      ))}
-
-      <mesh rotation-x={-Math.PI / 2} position={[0, -0.04, TRACK_LENGTH * 0.5 - 6]} receiveShadow>
-        <planeGeometry args={[54, TRACK_LENGTH * 1.4]} />
-        <meshStandardMaterial
-          color="#4a7a2f"
-          roughness={1}
-          metalness={0}
-        />
-      </mesh>
-
-      <PreRaceCountdown isActive={!isRaceActive} elapsedTime={elapsedTimeRef.current} />
-    </>
-  );
-}
-
-export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, playerSpeed = 50, cpuSpeed = 40, boostPulse = 0, slowPulse = 0 }) {
-  return (
-    <div style={{ width: "100%", height: "360px" }}>
-      <Canvas
-        shadows
-        camera={{ position: [0, 5, -3], fov: 50, near: 0.1, far: 1000 }}
-        gl={{ antialias: true, alpha: false }}
-      >
-        <Suspense fallback={null}>
-          <color attach="background" args={["#1a3a52"]} />
-          <fog attach="fog" args={["#1a3a52", 10, 180]} />
-
-          <Sky distance={450000} sunPosition={[120, 40, 140]} inclination={0.45} azimuth={0.3} />
-          <Stars radius={150} depth={50} count={3000} factor={5} saturation={0.3} fade speed={0.2} />
-
-          <AdvancedLighting />
-          <Environment preset="night" intensity={0.5} />
-
-          <Scene
-            playerProgress={playerProgress}
-            cpuProgress={cpuProgress}
-            playerSpeed={playerSpeed}
-            cpuSpeed={cpuSpeed}
-            boostPulse={boostPulse}
-            slowPulse={slowPulse}
-          />
-        </Suspense>
-      </Canvas>
-    </div>
-  );
-}
-
-useGLTF.preload(PLAYER_MODEL_URL);
-useGLTF.preload(CPU_MODEL_URL);
