@@ -1363,11 +1363,22 @@ export default function App() {
       });
 
       socket.on("race:room-full", (payload = {}) => {
+        const fullRoomCode = String(payload.roomCode || activeRoomCode || "").trim().toUpperCase();
+        const attemptedSocket = raceSocketRef.current;
+        if (attemptedSocket) {
+          attemptedSocket.off();
+          attemptedSocket.disconnect();
+          if (raceSocketRef.current === attemptedSocket) raceSocketRef.current = null;
+        }
+
+        setRaceRoomCode(fullRoomCode);
+        if (fullRoomCode) setRaceRoomInput(fullRoomCode);
         setRaceSocketStatus("full");
         setRaceOpponentReady(false);
         setRaceHadOpponent(false);
         setRaceOpponentName("Room Full");
         setRaceRoomCapacityInfo(`${Number(payload.currentPlayers) || 2}/${Number(payload.maxPlayers) || 2}`);
+        setScreen("intro");
       });
 
       socket.on("disconnect", () => {
@@ -2239,7 +2250,14 @@ export default function App() {
                 <div style={{ display: "grid", gap: 6 }}>
                   <input
                     value={raceRoomInput}
-                    onChange={(e) => setRaceRoomInput(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      setRaceRoomInput(e.target.value.toUpperCase());
+                      if (raceSocketStatus === "full") {
+                        setRaceSocketStatus("idle");
+                        setRaceRoomCapacityInfo("");
+                        setRaceOpponentName("Opponent");
+                      }
+                    }}
                     placeholder="Room code (leave empty to auto-generate)"
                     style={{
                       borderRadius: 8,
@@ -2278,6 +2296,50 @@ export default function App() {
                     )}
                     <span style={{ fontSize: 12, color: C.muted }}>{raceRoomStatusInfo.message}</span>
                   </div>
+
+                  {raceSocketStatus === "full" && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        className="casino-btn"
+                        onClick={() => {
+                          setRaceRoomInput("");
+                          setRaceRoomCode("");
+                          setRaceSocketStatus("idle");
+                          setRaceRoomCapacityInfo("");
+                          setRaceOpponentName("Opponent");
+                        }}
+                        style={{
+                          background: "rgba(255,255,255,0.86)",
+                          color: C.text,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 999,
+                          padding: "6px 12px",
+                          fontSize: 12,
+                        }}
+                      >
+                        Try another room
+                      </button>
+                      <button
+                        className="casino-btn"
+                        onClick={() => {
+                          setRaceRoomInput(generateRaceRoomCode());
+                          setRaceSocketStatus("idle");
+                          setRaceRoomCapacityInfo("");
+                          setRaceOpponentName("Opponent");
+                        }}
+                        style={{
+                          background: "linear-gradient(135deg, #ffd700, #ff8c00)",
+                          color: "#3a2400",
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 999,
+                          padding: "6px 12px",
+                          fontSize: 12,
+                        }}
+                      >
+                        Generate room
+                      </button>
+                    </div>
+                  )}
 
                   <div style={{ marginTop: 4, borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.72)", padding: "8px 10px", display: "grid", gap: 6 }}>
                     <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Active Sessions</div>
