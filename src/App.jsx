@@ -2,11 +2,12 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import initSqlJs from "sql.js";
 import sqlWasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url";
 import RaceThreeScene from "./RaceThreeScene";
+import { io } from "socket.io-client";
 
 const GAME_CONTENT_SEED_URL = "/seed-levels.json";
 const TOTAL_LIVES = 3;
 const QUESTION_TIME_LIMIT = 12;
-const RACE_DISTANCE = 1200;
+const RACE_DISTANCE = 4000;
 const RACE_QUESTION_TIME_LIMIT = 9;
 const RACE_BASE_CPU_SPEED = 40;
 const RACE_INITIAL_SPEED_GAP = 0;
@@ -14,6 +15,7 @@ const RACE_BASE_PLAYER_SPEED = RACE_BASE_CPU_SPEED + RACE_INITIAL_SPEED_GAP;
 const RACE_MIN_SPEED = 28;
 const RACE_MAX_SPEED = 74;
 const RACE_CPU_RAMP_INTERVAL_MS = 500;
+const SOCKET_SERVER_URL = (import.meta.env.VITE_SOCKET_SERVER_URL || "http://localhost:3001").trim();
 const BONUS_LIFE_STREAK = 5;
 const PENALTY_PER_WRONG = 30;
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -27,6 +29,8 @@ const ADMIN_PIN = import.meta.env.VITE_ADMIN_PIN || "123456";
 const UX_SETTINGS_KEY = "aq_ux_settings_v1";
 const PLAYER_STATS_KEY = "aq_player_stats_v1";
 const PLAYER_NAME_KEY = "aq_player_name_v1";
+const RACE_MODE_KEY = "aq_race_mode_v1";
+const RACE_ROOM_KEY = "aq_race_room_v1";
 const PUZZLE_PROFILE_KEY = "aq_puzzle_profile_v1";
 const DAILY_CHALLENGE_CLAIM_KEY = "aq_daily_claim_v1";
 
@@ -539,6 +543,9 @@ function buildRaceQuestions(levels) {
   );
   return shuffleArray(pool);
 }
+function generateRaceRoomCode() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
 
 function shufflePuzzleLines(items) {
   const copy = [...items];
@@ -853,6 +860,12 @@ export default function App() {
   const [raceFinalScore, setRaceFinalScore] = useState(0);
   const [raceLeaderboardSaved, setRaceLeaderboardSaved] = useState(false);
   const [raceEndReason, setRaceEndReason] = useState("finish");
+  const [raceMode, setRaceMode] = useState(() => safeLocalGet(RACE_MODE_KEY, "cpu"));
+  const [raceRoomInput, setRaceRoomInput] = useState(() => safeLocalGet(RACE_ROOM_KEY, ""));
+  const [raceRoomCode, setRaceRoomCode] = useState("");
+  const [raceSocketStatus, setRaceSocketStatus] = useState("idle");
+  const [raceOpponentName, setRaceOpponentName] = useState("Opponent");
+  const [raceOpponentReady, setRaceOpponentReady] = useState(false);
   const [dailyClaimDate, setDailyClaimDate] = useState("");
   const importFileRef = useRef(null);
   const timer = useRef(null);
@@ -860,6 +873,7 @@ export default function App() {
   const raceFeedbackTimer = useRef(null);
   const racePlayerSpeedRef = useRef(RACE_BASE_PLAYER_SPEED);
   const raceCpuSpeedRef = useRef(RACE_BASE_CPU_SPEED);
+  const raceSocketRef = useRef(null);
   const abortCtrlRef = useRef(null);
 
   useEffect(() => {
@@ -937,6 +951,14 @@ export default function App() {
   }, [playerName]);
 
   useEffect(() => {
+    safeLocalSet(RACE_MODE_KEY, raceMode === "pvp" ? "pvp" : "cpu");
+  }, [raceMode]);
+
+  useEffect(() => {
+    safeLocalSet(RACE_ROOM_KEY, raceRoomInput);
+  }, [raceRoomInput]);
+
+  useEffect(() => {
     safeLocalSet(PUZZLE_PROFILE_KEY, {
       chips: puzzleChips,
       streak: puzzleStreak,
@@ -992,6 +1014,18 @@ export default function App() {
   const raceQuestionTimeLimitMax = raceQuestion?.raceTimeLimit || RACE_QUESTION_TIME_LIMIT;
   const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
   const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
+  const isRacePvp = raceMode === "pvp";
+  const racePlayerLabel = playerName?.trim() || "You";
+  const raceOpponentLabel = isRacePvp ? (raceOpponentName || "Opponent") : "CPU";
+  const raceRoomStatusConfig = {
+    idle: { label: "Idle", color: "#927d61", bg: "rgba(146,125,97,0.12)", message: "Enter or generate a room code to race in PvP." },
+    connecting: { label: "Connecting", color: "#0d5f80", bg: "rgba(13,95,128,0.12)", message: "Connecting to socket server…" },
+    waiting: { label: "Waiting", color: "#a35000", bg: "rgba(163,80,0,0.12)", message: `Waiting for another player to join room ${raceRoomCode || "-"}.` },
+    matched: { label: "Matched", color: "#1f7a5c", bg: "rgba(31,122,92,0.12)", message: `${raceOpponentLabel} joined room ${raceRoomCode || "-"}. Race is live.` },
+    disconnected: { label: "Disconnected", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "Connection dropped. Rejoin the room to continue PvP." },
+    error: { label: "Error", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "Could not connect to socket server. Check server and URL." },
+  };
+  const raceRoomStatusInfo = raceRoomStatusConfig[raceSocketStatus] || raceRoomStatusConfig.idle;
 
   useEffect(() => {
     // Improved adaptive difficulty: more forgiving when struggling
@@ -1136,7 +1170,20 @@ export default function App() {
     setPicked(null); setShowFB(false); setScreen("game");
   };
 
-  const startRace = useCallback((name = playerName) => {
+  const disconnectRaceSocket = useCallback(() => {
+    const socket = raceSocketRef.current;
+    if (socket) {
+      socket.off();
+      socket.disconnect();
+      raceSocketRef.current = null;
+    }
+    setRaceSocketStatus("idle");
+    setRaceRoomCode("");
+    setRaceOpponentName("Opponent");
+    setRaceOpponentReady(false);
+  }, []);
+
+  const startRace = useCallback((name = playerName, mode = raceMode) => {
     const alias = (name || "").trim();
     if (!alias) {
       setScreen("namePicker");
@@ -1171,11 +1218,80 @@ export default function App() {
     setRaceLeaderboardSaved(false);
     setRaceEndReason("finish");
     setRaceStartTs(Date.now());
+
+    if (mode === "pvp") {
+      disconnectRaceSocket();
+      const activeRoomCode = (raceRoomInput || "").trim().toUpperCase() || generateRaceRoomCode();
+      const socket = io(SOCKET_SERVER_URL, {
+        transports: ["websocket", "polling"],
+        reconnection: false,
+        timeout: 2500,
+      });
+
+      raceSocketRef.current = socket;
+      setRaceRoomCode(activeRoomCode);
+      setRaceRoomInput(activeRoomCode);
+      setRaceSocketStatus("connecting");
+      setRaceOpponentName("Waiting...");
+      setRaceOpponentReady(false);
+
+      socket.on("connect", () => {
+        setRaceSocketStatus("waiting");
+        socket.emit("race:join", { roomCode: activeRoomCode, playerName: alias });
+      });
+
+      socket.on("race:presence", (payload = {}) => {
+        const players = Array.isArray(payload.players) ? payload.players : [];
+        const other = players.find((p) => p?.id && p.id !== socket.id);
+        if (other) {
+          setRaceOpponentName(other.name || "Opponent");
+          setRaceOpponentReady(true);
+          setRaceSocketStatus("matched");
+        } else {
+          setRaceOpponentName("Waiting...");
+          setRaceOpponentReady(false);
+          setRaceSocketStatus("waiting");
+          setRaceCpuDistance(0);
+          setRaceCpuSpeed(RACE_BASE_CPU_SPEED);
+        }
+      });
+
+      socket.on("race:state", (payload = {}) => {
+        if (!payload || payload.playerName === alias) return;
+        setRaceCpuDistance(Math.max(0, Math.min(RACE_DISTANCE, Number(payload.distance) || 0)));
+        setRaceCpuSpeed(Math.max(RACE_MIN_SPEED, Math.min(RACE_MAX_SPEED, Number(payload.speed) || RACE_BASE_CPU_SPEED)));
+        if (payload.playerName) setRaceOpponentName(payload.playerName);
+      });
+
+      socket.on("race:opponent-left", () => {
+        setRaceOpponentName("Waiting...");
+        setRaceOpponentReady(false);
+        setRaceSocketStatus("waiting");
+        setRaceCpuDistance(0);
+        setRaceCpuSpeed(RACE_BASE_CPU_SPEED);
+      });
+
+      socket.on("disconnect", () => {
+        setRaceSocketStatus("disconnected");
+        setRaceOpponentReady(false);
+      });
+
+      socket.on("connect_error", () => {
+        setRaceSocketStatus("error");
+        setRaceOpponentReady(false);
+      });
+    } else {
+      disconnectRaceSocket();
+      setRaceOpponentName("CPU");
+      setRaceOpponentReady(true);
+    }
+
     setScreen("raceGame");
-  }, [levels, playerName]);
+  }, [levels, playerName, raceMode, raceRoomInput, disconnectRaceSocket]);
 
   const handleRaceAnswer = useCallback((idx, timedOut = false) => {
     if (raceShowFeedback || !raceQuestion || screen !== "raceGame") return;
+    if (isRacePvp && !raceOpponentReady) return;
     if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
     const correct = idx === raceQuestion.answer;
     const paceReward = raceQuestion.paceReward || 10;
@@ -1200,18 +1316,18 @@ export default function App() {
       const timeoutPenalty = pacePenalty + 2;
       setRaceWrongCount(c => c + 1);
       setRaceStreak(0);
-      setRaceFeedbackLabel(`Timeout! ${topicTag} pressure -${timeoutPenalty} mph, CPU +6 mph`);
+      setRaceFeedbackLabel(`Timeout! ${topicTag} pressure -${timeoutPenalty} mph${isRacePvp ? "" : ", CPU +6 mph"}`);
       setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - timeoutPenalty));
-      setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 6));
+      if (!isRacePvp) setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 6));
       setRaceSlowPulse(v => v + 1);
       if (soundEnabled) playTone(380, 0.06, "square", 0.018);
     } else {
       const wrongPenalty = pacePenalty + 3;
       setRaceWrongCount(c => c + 1);
       setRaceStreak(0);
-      setRaceFeedbackLabel(`Wrong! ${topicTag} penalty -${wrongPenalty} mph, CPU +4 mph`);
+      setRaceFeedbackLabel(`Wrong! ${topicTag} penalty -${wrongPenalty} mph${isRacePvp ? "" : ", CPU +4 mph"}`);
       setRacePlayerSpeed(speed => Math.max(RACE_MIN_SPEED, speed - wrongPenalty));
-      setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 4));
+      if (!isRacePvp) setRaceCpuSpeed(speed => Math.min(RACE_MAX_SPEED, speed + 4));
       setRaceSlowPulse(v => v + 1);
       if (soundEnabled) playTone(260, 0.1, "sawtooth", 0.025);
     }
@@ -1221,7 +1337,7 @@ export default function App() {
       setRacePicked(null);
       setRaceQuestionIdx(i => i + 1);
     }, 850);
-  }, [raceShowFeedback, raceQuestion, screen, soundEnabled, raceStreak]);
+  }, [raceShowFeedback, raceQuestion, screen, soundEnabled, raceStreak, isRacePvp, raceOpponentReady]);
 
   useEffect(() => {
     racePlayerSpeedRef.current = racePlayerSpeed;
@@ -1233,6 +1349,7 @@ export default function App() {
 
   useEffect(() => {
     if (screen !== "raceGame" || !raceQuestion || raceResult) return undefined;
+    if (isRacePvp && !raceOpponentReady) return undefined;
     if (raceShowFeedback) return undefined;
     const startedAt = Date.now();
     setRaceQuestionStartedAt(startedAt);
@@ -1247,10 +1364,10 @@ export default function App() {
       }
     }, 200);
     return () => clearInterval(id);
-  }, [screen, raceQuestion, raceShowFeedback, raceResult, handleRaceAnswer, raceQuestionTimeLimitMax]);
+  }, [screen, raceQuestion, raceShowFeedback, raceResult, handleRaceAnswer, raceQuestionTimeLimitMax, isRacePvp, raceOpponentReady]);
 
   useEffect(() => {
-    if (screen !== "raceGame" || raceResult) return undefined;
+    if (screen !== "raceGame" || raceResult || isRacePvp) return undefined;
     const id = setInterval(() => {
       const lead = racePlayerDistance - raceCpuDistance;
       const progressPressure = (raceQuestionIdx / Math.max(1, raceQuestions.length || 1)) * 10;
@@ -1260,16 +1377,33 @@ export default function App() {
       setRaceCpuSpeed(speed => speed + (target - speed) * 0.32);
     }, RACE_CPU_RAMP_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [screen, raceResult, racePlayerDistance, raceCpuDistance, raceQuestionIdx, raceQuestions.length, raceWrongCount, raceCorrectCount]);
+  }, [screen, raceResult, racePlayerDistance, raceCpuDistance, raceQuestionIdx, raceQuestions.length, raceWrongCount, raceCorrectCount, isRacePvp]);
 
   useEffect(() => {
     if (screen !== "raceGame" || raceResult) return undefined;
+    if (isRacePvp && !raceOpponentReady) return undefined;
     const id = setInterval(() => {
       setRacePlayerDistance(distance => Math.min(RACE_DISTANCE, distance + racePlayerSpeedRef.current * 0.08));
-      setRaceCpuDistance(distance => Math.min(RACE_DISTANCE, distance + raceCpuSpeedRef.current * 0.08));
+      if (!isRacePvp) {
+        setRaceCpuDistance(distance => Math.min(RACE_DISTANCE, distance + raceCpuSpeedRef.current * 0.08));
+      }
     }, 80);
     return () => clearInterval(id);
-  }, [screen, raceResult]);
+  }, [screen, raceResult, isRacePvp, raceOpponentReady]);
+
+  useEffect(() => {
+    if (screen !== "raceGame" || !isRacePvp) return;
+    const socket = raceSocketRef.current;
+    if (!socket || !socket.connected || !raceRoomCode) return;
+    socket.emit("race:state", {
+      roomCode: raceRoomCode,
+      playerName,
+      distance: racePlayerDistance,
+      speed: racePlayerSpeed,
+      questionIdx: raceQuestionIdx,
+      result: raceResult,
+    });
+  }, [screen, isRacePvp, raceRoomCode, playerName, racePlayerDistance, racePlayerSpeed, raceQuestionIdx, raceResult]);
 
   useEffect(() => {
     if (screen !== "raceGame" || raceResult) return;
@@ -1300,8 +1434,9 @@ export default function App() {
   useEffect(() => {
     if (screen === "raceGame") return undefined;
     if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
+    if (isRacePvp) disconnectRaceSocket();
     return undefined;
-  }, [screen]);
+  }, [screen, isRacePvp, disconnectRaceSocket]);
 
   const savePlayerAlias = () => {
     const alias = nameInput.trim();
@@ -1666,8 +1801,9 @@ export default function App() {
       if (puzzleTimer.current) clearTimeout(puzzleTimer.current);
       if (raceFeedbackTimer.current) clearTimeout(raceFeedbackTimer.current);
       if (abortCtrlRef.current) abortCtrlRef.current.abort();
+      disconnectRaceSocket();
     };
-  }, []);
+  }, [disconnectRaceSocket]);
 
   // Casino color palette
   const themeOverrides = selectedTheme === "ocean"
@@ -1924,6 +2060,67 @@ export default function App() {
               </button>
             </div>
 
+            <div style={{ marginBottom: 14, borderRadius: 12, padding: "10px 12px", border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.64)", display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Race Opponent</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="casino-btn"
+                  onClick={() => setRaceMode("cpu")}
+                  style={{
+                    background: raceMode === "cpu" ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.8)",
+                    color: raceMode === "cpu" ? "#3a2400" : C.text,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 999,
+                    padding: "8px 14px",
+                    fontSize: 13,
+                  }}
+                >
+                  vs CPU
+                </button>
+                <button
+                  className="casino-btn"
+                  onClick={() => setRaceMode("pvp")}
+                  style={{
+                    background: raceMode === "pvp" ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.8)",
+                    color: raceMode === "pvp" ? "#3a2400" : C.text,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 999,
+                    padding: "8px 14px",
+                    fontSize: 13,
+                  }}
+                >
+                  PvP (Socket)
+                </button>
+              </div>
+              {raceMode === "pvp" && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <input
+                    value={raceRoomInput}
+                    onChange={(e) => setRaceRoomInput(e.target.value.toUpperCase())}
+                    placeholder="Room code (leave empty to auto-generate)"
+                    style={{
+                      borderRadius: 8,
+                      border: `1px solid ${C.border}`,
+                      background: "rgba(255,255,255,0.84)",
+                      color: C.text,
+                      padding: "8px 10px",
+                      fontSize: 13,
+                      letterSpacing: 0.6,
+                    }}
+                  />
+                  <div style={{ fontSize: 12, color: C.muted }}>
+                    Socket server: <b style={{ color: C.text }}>{SOCKET_SERVER_URL}</b>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: raceRoomStatusInfo.color, background: raceRoomStatusInfo.bg, borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}` }}>
+                      {raceRoomStatusInfo.label}
+                    </span>
+                    <span style={{ fontSize: 12, color: C.muted }}>{raceRoomStatusInfo.message}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
               <button
                 className="casino-btn"
@@ -1954,7 +2151,7 @@ export default function App() {
               <button
                 className="casino-btn"
                 disabled={zoneCount === 0}
-                onClick={() => startRace(playerName)}
+                onClick={() => startRace(playerName, raceMode)}
                 style={{
                   background: "rgba(255,255,255,0.75)", color: C.text,
                   border: `1.5px solid ${C.border}`, padding: "15px 24px",
@@ -2722,6 +2919,10 @@ export default function App() {
                 ← Exit Race
               </button>
               <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: C.faint }}>{isRacePvp ? `Room ${raceRoomCode || "-"}` : "vs CPU"}</div>
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: isRacePvp ? raceRoomStatusInfo.color : "#1f7a5c", background: isRacePvp ? raceRoomStatusInfo.bg : "rgba(31,122,92,0.12)", borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}` }}>
+                  {isRacePvp ? raceRoomStatusInfo.label : "Ready"}
+                </div>
                 <div style={{ fontSize: 12, color: C.faint }}>Question {raceQuestionIdx + 1}</div>
                 <div style={{ fontSize: 12, color: C.faint }}>✅ {raceCorrectCount}</div>
                 <div style={{ fontSize: 12, color: C.faint }}>❌ {raceWrongCount}</div>
@@ -2729,6 +2930,12 @@ export default function App() {
                 <TimerRing value={raceQuestionTimeLeft} max={raceQuestionTimeLimitMax} />
               </div>
             </div>
+
+            {isRacePvp && (
+              <div style={{ marginTop: -4, marginBottom: 2, borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.74)", padding: "8px 12px", fontSize: 12, color: C.muted }}>
+                {raceRoomStatusInfo.message}
+              </div>
+            )}
 
             <RaceThreeScene
               playerProgress={racePlayerProgress}
@@ -2740,18 +2947,18 @@ export default function App() {
             />
 
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: -2, marginBottom: 2, fontSize: 12, color: C.muted }}>
-              <span>Player distance: <b style={{ color: C.text }}>{racePlayerProgress.toFixed(1)}%</b></span>
-              <span>CPU distance: <b style={{ color: C.text }}>{raceCpuProgress.toFixed(1)}%</b></span>
+              <span>{racePlayerLabel} distance: <b style={{ color: C.text }}>{racePlayerProgress.toFixed(1)}%</b></span>
+              <span>{raceOpponentLabel} distance: <b style={{ color: C.text }}>{raceCpuProgress.toFixed(1)}%</b></span>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: 10 }}>
               <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.68)", padding: "10px 12px" }}>
-                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Player Speed</div>
-                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: racePlayerSpeed > raceCpuSpeed ? "#1f7a5c" : C.text }}>{Math.round(racePlayerSpeed)} mph</div>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>{raceOpponentLabel} Speed</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: raceCpuSpeed > racePlayerSpeed ? "#a35000" : C.text }}>{Math.round(raceCpuSpeed)} mph</div>
               </div>
               <div style={{ borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.68)", padding: "10px 12px" }}>
-                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>CPU Speed</div>
-                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: raceCpuSpeed > racePlayerSpeed ? "#a35000" : C.text }}>{Math.round(raceCpuSpeed)} mph</div>
+                <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>{racePlayerLabel} Speed</div>
+                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, color: racePlayerSpeed > raceCpuSpeed ? "#1f7a5c" : C.text }}>{Math.round(racePlayerSpeed)} mph</div>
               </div>
             </div>
 
@@ -2780,7 +2987,7 @@ export default function App() {
                     <button
                       key={`${raceQuestionIdx}-${i}`}
                       className="opt-casino"
-                      disabled={raceShowFeedback}
+                      disabled={raceShowFeedback || (isRacePvp && !raceOpponentReady)}
                       onClick={() => handleRaceAnswer(i)}
                       style={{
                         borderRadius: 10,
@@ -2802,6 +3009,11 @@ export default function App() {
                   {raceFeedbackLabel}
                 </div>
               )}
+              {isRacePvp && !raceOpponentReady && (
+                <div style={{ marginTop: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.7)", padding: "9px 12px", color: C.muted, fontSize: 13, fontWeight: 700 }}>
+                  Waiting for opponent in room <b style={{ color: C.text }}>{raceRoomCode || "-"}</b>…
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2817,10 +3029,10 @@ export default function App() {
             </div>
             <p style={{ color: C.muted, margin: "4px 0 16px", fontSize: 14 }}>
               {raceResult === "win"
-                ? "You won the race. You outran the CPU with smart Angular answers."
+                ? `You won the race. You outran ${raceOpponentLabel} with smart Angular answers.`
                 : raceEndReason === "speed-drop"
-                  ? "You lost the race: your speed became equal to or lower than CPU speed."
-                  : "You lost the race: CPU reached the finish first. Refuel and retry."}
+                  ? `You lost the race: your speed became equal to or lower than ${raceOpponentLabel} speed.`
+                  : `You lost the race: ${raceOpponentLabel} reached the finish first. Refuel and retry.`}
             </p>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 16 }}>
@@ -2842,7 +3054,7 @@ export default function App() {
               <button className="casino-btn" onClick={() => goLeaderboard("raceResult")} style={{ background: "rgba(255,255,255,0.8)", color: C.text, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14 }}>
                 🏆 Leaderboard
               </button>
-              <button className="casino-btn" onClick={() => startRace(playerName)} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", borderRadius: 10, padding: "10px 18px", fontSize: 15 }}>
+              <button className="casino-btn" onClick={() => startRace(playerName, raceMode)} style={{ background: "linear-gradient(135deg, #ffd700, #ff8c00)", color: "#3a2400", borderRadius: 10, padding: "10px 18px", fontSize: 15 }}>
                 🏁 Race Again
               </button>
             </div>

@@ -42,6 +42,22 @@ npm install
 npm run dev
 ```
 
+## Run PvP (Socket mode)
+
+In a second terminal, start the socket server:
+
+```bash
+npm run socket
+```
+
+Then run the app as usual with `npm run dev`.
+
+Optional: point the app to another socket host by creating `.env`:
+
+```bash
+VITE_SOCKET_SERVER_URL=http://localhost:3001
+```
+
 ## Build for hosting
 
 ```bash

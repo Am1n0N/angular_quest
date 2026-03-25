@@ -7,19 +7,23 @@ const PLAYER_LANE_X = -2.2;
 const CPU_LANE_X = 2.2;
 const SPEED_DISPLAY_FACTOR = 16;
 
-export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, playerSpeed = 40, cpuSpeed = 40 }) {
+export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, playerSpeed = 40, cpuSpeed = 40, boostPulse = 0, slowPulse = 0 }) {
   const containerRef = useRef(null);
   const playerProgressRef = useRef(playerProgress);
   const cpuProgressRef = useRef(cpuProgress);
   const playerSpeedRef = useRef(playerSpeed);
   const cpuSpeedRef = useRef(cpuSpeed);
+  const boostPulseRef = useRef(boostPulse);
+  const slowPulseRef = useRef(slowPulse);
 
   useEffect(() => {
     playerProgressRef.current = playerProgress;
     cpuProgressRef.current = cpuProgress;
     playerSpeedRef.current = playerSpeed;
     cpuSpeedRef.current = cpuSpeed;
-  }, [playerProgress, cpuProgress, playerSpeed, cpuSpeed]);
+    boostPulseRef.current = boostPulse;
+    slowPulseRef.current = slowPulse;
+  }, [playerProgress, cpuProgress, playerSpeed, cpuSpeed, boostPulse, slowPulse]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -336,6 +340,38 @@ export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, pl
     cMesh.position.set(CPU_LANE_X, 0, 0);
     scene.add(cMesh);
 
+    // ── SPEED FX ──────────────────────────────────────────────
+    const boostRing = new THREE.Mesh(
+      new THREE.TorusGeometry(1.15, 0.06, 10, 28),
+      new THREE.MeshBasicMaterial({ color: "#57f1ff", transparent: true, opacity: 0, depthWrite: false })
+    );
+    boostRing.rotation.x = Math.PI / 2;
+    boostRing.visible = false;
+    scene.add(boostRing);
+
+    const boostStreaks = [];
+    for (let i = 0; i < 10; i++) {
+      const streak = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, 0.06, 1.2 + Math.random() * 1.4),
+        new THREE.MeshBasicMaterial({ color: "#90f7ff", transparent: true, opacity: 0, depthWrite: false })
+      );
+      streak.visible = false;
+      scene.add(streak);
+      boostStreaks.push(streak);
+    }
+
+    const slowPuffs = [];
+    for (let i = 0; i < 14; i++) {
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12 + Math.random() * 0.08, 8, 8),
+        new THREE.MeshBasicMaterial({ color: "#d4dae0", transparent: true, opacity: 0, depthWrite: false })
+      );
+      puff.visible = false;
+      puff.userData.seed = Math.random() * Math.PI * 2;
+      scene.add(puff);
+      slowPuffs.push(puff);
+    }
+
     // ── ANIMATION LOOP ────────────────────────────────────────
     let rafId = 0;
     let lastTime = performance.now();
@@ -345,6 +381,10 @@ export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, pl
     let cZRender = (cpuProgressRef.current / 100) * FINISH_Z;
     let pSpeedRender = playerSpeedRef.current;
     let cSpeedRender = cpuSpeedRef.current;
+    let boostFxLife = 0;
+    let slowFxLife = 0;
+    let seenBoostPulse = boostPulseRef.current;
+    let seenSlowPulse = slowPulseRef.current;
 
     function animate() {
       rafId = requestAnimationFrame(animate);
@@ -358,6 +398,17 @@ export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, pl
       const currentCpuProgress = cpuProgressRef.current;
       const currentPlayerSpeed = playerSpeedRef.current;
       const currentCpuSpeed = cpuSpeedRef.current;
+      const currentBoostPulse = boostPulseRef.current;
+      const currentSlowPulse = slowPulseRef.current;
+
+      if (currentBoostPulse !== seenBoostPulse) {
+        boostFxLife = 1;
+        seenBoostPulse = currentBoostPulse;
+      }
+      if (currentSlowPulse !== seenSlowPulse) {
+        slowFxLife = 1;
+        seenSlowPulse = currentSlowPulse;
+      }
 
       const pZTarget = (currentPlayerProgress / 100) * FINISH_Z;
       const cZTarget = (currentCpuProgress / 100) * FINISH_Z;
@@ -389,7 +440,64 @@ export default function RaceThreeScene({ playerProgress = 0, cpuProgress = 0, pl
       }
 
       // Glow pulse
-      pMesh.userData.glowMat.emissiveIntensity = 0.22 + Math.sin(t * 8) * 0.08;
+      const speedDelta = currentPlayerSpeed - currentCpuSpeed;
+      const speedBias = THREE.MathUtils.clamp((speedDelta / SPEED_DISPLAY_FACTOR) * 0.2, -0.08, 0.2);
+      pMesh.userData.glowMat.emissiveIntensity = 0.22 + Math.sin(t * 8) * 0.08 + speedBias;
+
+      // Boost FX animation
+      if (boostFxLife > 0.001) {
+        boostFxLife = Math.max(0, boostFxLife - dt * 1.7);
+        const intensity = boostFxLife;
+        boostRing.visible = true;
+        boostRing.material.opacity = 0.34 * intensity;
+        boostRing.position.set(pMesh.position.x, 0.24, pMesh.position.z - 0.25);
+        const ringScale = 1 + (1 - intensity) * 1.8;
+        boostRing.scale.set(ringScale, ringScale, ringScale);
+
+        for (let i = 0; i < boostStreaks.length; i++) {
+          const streak = boostStreaks[i];
+          const phase = t * 12 + i * 0.75;
+          const side = i % 2 ? 1 : -1;
+          streak.visible = true;
+          streak.material.opacity = 0.22 * intensity * (0.55 + Math.abs(Math.sin(phase)) * 0.45);
+          streak.position.set(
+            pMesh.position.x + side * (0.34 + (i % 3) * 0.12),
+            0.45 + ((i % 4) * 0.04),
+            pMesh.position.z - 1.2 - ((phase % 1) * 2.6)
+          );
+        }
+      } else {
+        boostRing.visible = false;
+        boostStreaks.forEach((s) => {
+          s.visible = false;
+          s.material.opacity = 0;
+        });
+      }
+
+      // Slow-down smoke FX
+      if (slowFxLife > 0.001) {
+        slowFxLife = Math.max(0, slowFxLife - dt * 1.35);
+        const intensity = slowFxLife;
+        for (let i = 0; i < slowPuffs.length; i++) {
+          const puff = slowPuffs[i];
+          const seed = puff.userData.seed;
+          const drift = (t * 1.3 + seed + i * 0.2) % 1;
+          const side = i % 2 ? 1 : -1;
+          puff.visible = true;
+          puff.material.opacity = 0.3 * intensity * (1 - drift);
+          puff.scale.setScalar(0.7 + drift * 1.4);
+          puff.position.set(
+            pMesh.position.x + side * (0.64 + (i % 3) * 0.08) + Math.sin(seed + t * 3) * 0.08,
+            0.2 + drift * 0.9,
+            pMesh.position.z - 1.45 - drift * 1.9
+          );
+        }
+      } else {
+        slowPuffs.forEach((p) => {
+          p.visible = false;
+          p.material.opacity = 0;
+        });
+      }
 
       // Camera follow
       const camTY = 5;
