@@ -15,7 +15,9 @@ const RACE_BASE_PLAYER_SPEED = RACE_BASE_CPU_SPEED + RACE_INITIAL_SPEED_GAP;
 const RACE_MIN_SPEED = 28;
 const RACE_MAX_SPEED = 74;
 const RACE_CPU_RAMP_INTERVAL_MS = 500;
-const SOCKET_SERVER_URL = (import.meta.env.VITE_SOCKET_SERVER_URL || "http://localhost:3001").trim();
+const IS_LOCALHOST_ENV = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const SOCKET_SERVER_URL = (import.meta.env.VITE_SOCKET_SERVER_URL || (IS_LOCALHOST_ENV ? "http://localhost:3001" : "")).trim();
+const PVP_AVAILABLE = SOCKET_SERVER_URL.length > 0;
 const BONUS_LIFE_STREAK = 5;
 const PENALTY_PER_WRONG = 30;
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -955,6 +957,13 @@ export default function App() {
   }, [raceMode]);
 
   useEffect(() => {
+    if (!PVP_AVAILABLE && raceMode === "pvp") {
+      setRaceMode("cpu");
+      setRaceSocketStatus("idle");
+    }
+  }, [raceMode]);
+
+  useEffect(() => {
     safeLocalSet(RACE_ROOM_KEY, raceRoomInput);
   }, [raceRoomInput]);
 
@@ -1014,7 +1023,7 @@ export default function App() {
   const raceQuestionTimeLimitMax = raceQuestion?.raceTimeLimit || RACE_QUESTION_TIME_LIMIT;
   const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
   const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
-  const isRacePvp = raceMode === "pvp";
+  const isRacePvp = raceMode === "pvp" && PVP_AVAILABLE;
   const racePlayerLabel = playerName?.trim() || "You";
   const raceOpponentLabel = isRacePvp ? (raceOpponentName || "Opponent") : "CPU";
   const raceRoomStatusConfig = {
@@ -1024,8 +1033,11 @@ export default function App() {
     matched: { label: "Matched", color: "#1f7a5c", bg: "rgba(31,122,92,0.12)", message: `${raceOpponentLabel} joined room ${raceRoomCode || "-"}. Race is live.` },
     disconnected: { label: "Disconnected", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "Connection dropped. Rejoin the room to continue PvP." },
     error: { label: "Error", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "Could not connect to socket server. Check server and URL." },
+    unavailable: { label: "Unavailable", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "PvP requires a deployed Socket.IO server. Set VITE_SOCKET_SERVER_URL." },
   };
-  const raceRoomStatusInfo = raceRoomStatusConfig[raceSocketStatus] || raceRoomStatusConfig.idle;
+  const raceRoomStatusInfo = !PVP_AVAILABLE && raceMode === "pvp"
+    ? raceRoomStatusConfig.unavailable
+    : (raceRoomStatusConfig[raceSocketStatus] || raceRoomStatusConfig.idle);
 
   useEffect(() => {
     // Improved adaptive difficulty: more forgiving when struggling
@@ -1219,7 +1231,16 @@ export default function App() {
     setRaceEndReason("finish");
     setRaceStartTs(Date.now());
 
-    if (mode === "pvp") {
+    const usePvp = mode === "pvp" && PVP_AVAILABLE;
+
+    if (mode === "pvp" && !PVP_AVAILABLE) {
+      setRaceSocketStatus("unavailable");
+      setRaceOpponentName("CPU");
+      setRaceOpponentReady(true);
+      setRaceMode("cpu");
+    }
+
+    if (usePvp) {
       disconnectRaceSocket();
       const activeRoomCode = (raceRoomInput || "").trim().toUpperCase() || generateRaceRoomCode();
       const socket = io(SOCKET_SERVER_URL, {
@@ -2079,14 +2100,16 @@ export default function App() {
                 </button>
                 <button
                   className="casino-btn"
-                  onClick={() => setRaceMode("pvp")}
+                  onClick={() => PVP_AVAILABLE && setRaceMode("pvp")}
+                  disabled={!PVP_AVAILABLE}
                   style={{
                     background: raceMode === "pvp" ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.8)",
-                    color: raceMode === "pvp" ? "#3a2400" : C.text,
+                    color: raceMode === "pvp" ? "#3a2400" : (PVP_AVAILABLE ? C.text : C.faint),
                     border: `1px solid ${C.border}`,
                     borderRadius: 999,
                     padding: "8px 14px",
                     fontSize: 13,
+                    opacity: PVP_AVAILABLE ? 1 : 0.65,
                   }}
                 >
                   PvP (Socket)
@@ -2109,7 +2132,7 @@ export default function App() {
                     }}
                   />
                   <div style={{ fontSize: 12, color: C.muted }}>
-                    Socket server: <b style={{ color: C.text }}>{SOCKET_SERVER_URL}</b>
+                    Socket server: <b style={{ color: C.text }}>{SOCKET_SERVER_URL || "Not configured"}</b>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: raceRoomStatusInfo.color, background: raceRoomStatusInfo.bg, borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}` }}>

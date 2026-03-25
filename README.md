@@ -58,6 +58,38 @@ Optional: point the app to another socket host by creating `.env`:
 VITE_SOCKET_SERVER_URL=http://localhost:3001
 ```
 
+## Deploy Socket Server on Render
+
+This repo includes a Render blueprint file at [render.yaml](render.yaml) for the Socket.IO server.
+
+### Quick steps
+
+1. Push this repo to GitHub.
+2. In Render, create a **Blueprint** from the repo.
+3. Render will create service `angular-quest-socket` using `npm run socket`.
+4. Set env var `ALLOWED_ORIGINS` in Render dashboard, for example:
+
+```bash
+https://your-app.vercel.app,https://your-preview.vercel.app
+```
+
+5. Copy your Render service URL (for example `https://angular-quest-socket.onrender.com`).
+6. In Vercel project settings, set:
+
+```bash
+VITE_SOCKET_SERVER_URL=https://angular-quest-socket.onrender.com
+```
+
+7. Redeploy Vercel.
+
+### Health check
+
+Render uses `/health`, which returns:
+
+```json
+{"ok":true,"service":"angular-quest-socket"}
+```
+
 ## Build for hosting
 
 ```bash

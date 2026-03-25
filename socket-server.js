@@ -2,15 +2,41 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 
 const PORT = Number(process.env.PORT || 3001);
+const RAW_ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "").trim();
+const ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
-const httpServer = createServer((_, res) => {
+function corsOriginValidator(origin, callback) {
+    if (!origin) {
+        callback(null, true);
+        return;
+    }
+
+    if (ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes("*")) {
+        callback(null, true);
+        return;
+    }
+
+    const isAllowed = ALLOWED_ORIGINS.includes(origin);
+    callback(isAllowed ? null : new Error("Origin not allowed by CORS"), isAllowed);
+}
+
+const httpServer = createServer((req, res) => {
+    if (req.url === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, service: "angular-quest-socket" }));
+        return;
+    }
+
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("Angular Quest PvP socket server is running.\n");
 });
 
 const io = new Server(httpServer, {
     cors: {
-        origin: "*",
+        origin: corsOriginValidator,
         methods: ["GET", "POST"],
     },
 });
@@ -83,5 +109,10 @@ io.on("connection", (socket) => {
 });
 
 httpServer.listen(PORT, () => {
-    console.log(`Angular Quest PvP socket server listening on http://localhost:${PORT}`);
+    console.log(`Angular Quest PvP socket server listening on port ${PORT}`);
+    if (ALLOWED_ORIGINS.length > 0) {
+        console.log(`CORS allowlist: ${ALLOWED_ORIGINS.join(", ")}`);
+    } else {
+        console.log("CORS allowlist: * (all origins)");
+    }
 });
