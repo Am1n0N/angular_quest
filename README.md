@@ -70,8 +70,10 @@ This repo includes a Render blueprint file at [render.yaml](render.yaml) for the
 4. Set env var `ALLOWED_ORIGINS` in Render dashboard, for example:
 
 ```bash
-https://your-app.vercel.app,https://your-preview.vercel.app
+https://your-app.vercel.app,https://*.vercel.app
 ```
+
+`ALLOWED_ORIGINS` accepts exact origins and `*` wildcards.
 
 5. Copy your Render service URL (for example `https://angular-quest-socket.onrender.com`).
 6. In Vercel project settings, set:

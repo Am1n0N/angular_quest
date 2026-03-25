@@ -8,19 +8,38 @@ const ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function toOriginMatcher(pattern) {
+    if (pattern === "*") return /^.*$/;
+    if (!pattern.includes("*")) return null;
+    const regexSource = `^${pattern.split("*").map(escapeRegex).join(".*")}$`;
+    return new RegExp(regexSource);
+}
+
+const ALLOWED_ORIGIN_MATCHERS = ALLOWED_ORIGINS
+    .map(toOriginMatcher)
+    .filter(Boolean);
+
+function isOriginAllowed(origin) {
+    if (ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes("*")) return true;
+    if (ALLOWED_ORIGINS.includes(origin)) return true;
+    return ALLOWED_ORIGIN_MATCHERS.some((matcher) => matcher.test(origin));
+}
+
 function corsOriginValidator(origin, callback) {
     if (!origin) {
         callback(null, true);
         return;
     }
 
-    if (ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes("*")) {
-        callback(null, true);
-        return;
+    const allowed = isOriginAllowed(origin);
+    if (!allowed) {
+        console.warn(`CORS blocked origin: ${origin}`);
     }
-
-    const isAllowed = ALLOWED_ORIGINS.includes(origin);
-    callback(isAllowed ? null : new Error("Origin not allowed by CORS"), isAllowed);
+    callback(allowed ? null : new Error("Origin not allowed by CORS"), allowed);
 }
 
 const httpServer = createServer((req, res) => {
@@ -38,6 +57,7 @@ const io = new Server(httpServer, {
     cors: {
         origin: corsOriginValidator,
         methods: ["GET", "POST"],
+        credentials: true,
     },
 });
 
