@@ -880,6 +880,10 @@ export default function App() {
   const raceFeedbackTimer = useRef(null);
   const racePlayerSpeedRef = useRef(RACE_BASE_PLAYER_SPEED);
   const raceCpuSpeedRef = useRef(RACE_BASE_CPU_SPEED);
+  const racePlayerDistanceRef = useRef(0);
+  const raceQuestionIdxRef = useRef(0);
+  const raceResultRef = useRef(null);
+  const playerNameRef = useRef("");
   const raceSocketRef = useRef(null);
   const abortCtrlRef = useRef(null);
 
@@ -1460,6 +1464,22 @@ export default function App() {
   }, [raceCpuSpeed]);
 
   useEffect(() => {
+    racePlayerDistanceRef.current = racePlayerDistance;
+  }, [racePlayerDistance]);
+
+  useEffect(() => {
+    raceQuestionIdxRef.current = raceQuestionIdx;
+  }, [raceQuestionIdx]);
+
+  useEffect(() => {
+    raceResultRef.current = raceResult;
+  }, [raceResult]);
+
+  useEffect(() => {
+    playerNameRef.current = playerName;
+  }, [playerName]);
+
+  useEffect(() => {
     if (screen !== "raceGame" || !raceQuestion || raceResult) return undefined;
     if (isRacePvp && !raceOpponentReady) return undefined;
     if (raceShowFeedback) return undefined;
@@ -1503,19 +1523,26 @@ export default function App() {
     return () => clearInterval(id);
   }, [screen, raceResult, isRacePvp, raceOpponentReady]);
 
+  // Synchronize car position over WebSocket at fixed intervals (PvP races)
   useEffect(() => {
-    if (screen !== "raceGame" || !isRacePvp) return;
+    if (screen !== "raceGame" || !isRacePvp || !raceOpponentReady) return;
     const socket = raceSocketRef.current;
     if (!socket || !socket.connected || !raceRoomCode) return;
-    socket.emit("race:state", {
-      roomCode: raceRoomCode,
-      playerName,
-      distance: racePlayerDistance,
-      speed: racePlayerSpeed,
-      questionIdx: raceQuestionIdx,
-      result: raceResult,
-    });
-  }, [screen, isRacePvp, raceRoomCode, playerName, racePlayerDistance, racePlayerSpeed, raceQuestionIdx, raceResult]);
+
+    // Emit position updates every 80ms for smooth synchronization
+    const syncInterval = setInterval(() => {
+      socket.emit("race:state", {
+        roomCode: raceRoomCode,
+        playerName: playerNameRef.current,
+        distance: racePlayerDistanceRef.current,
+        speed: racePlayerSpeedRef.current,
+        questionIdx: raceQuestionIdxRef.current,
+        result: raceResultRef.current,
+      });
+    }, 80);
+
+    return () => clearInterval(syncInterval);
+  }, [screen, isRacePvp, raceOpponentReady, raceRoomCode]);
 
   useEffect(() => {
     if (screen !== "raceGame" || raceResult) return;
