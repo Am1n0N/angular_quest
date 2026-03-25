@@ -1244,9 +1244,12 @@ export default function App() {
       disconnectRaceSocket();
       const activeRoomCode = (raceRoomInput || "").trim().toUpperCase() || generateRaceRoomCode();
       const socket = io(SOCKET_SERVER_URL, {
-        transports: ["websocket", "polling"],
-        reconnection: false,
-        timeout: 2500,
+        transports: ["polling", "websocket"],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1200,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
       });
 
       raceSocketRef.current = socket;
