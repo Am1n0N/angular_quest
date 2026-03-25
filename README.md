@@ -75,6 +75,8 @@ https://your-app.vercel.app,https://*.vercel.app
 
 `ALLOWED_ORIGINS` accepts exact origins and `*` wildcards.
 
+You can also use multiple lines or `;` separators in Render env values.
+
 5. Copy your Render service URL (for example `https://angular-quest-socket.onrender.com`).
 6. In Vercel project settings, set:
 
@@ -91,6 +93,15 @@ Render uses `/health`, which returns:
 ```json
 {"ok":true,"service":"angular-quest-socket"}
 ```
+
+To debug CORS on the deployed socket service:
+
+```bash
+curl https://angular-quest-socket.onrender.com/health
+curl "https://angular-quest-socket.onrender.com/debug/cors?origin=https://your-preview.vercel.app"
+```
+
+The second command should return `"allowed": true`.
 
 ## Build for hosting
 

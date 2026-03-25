@@ -1024,6 +1024,7 @@ export default function App() {
   const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
   const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
   const isRacePvp = raceMode === "pvp" && PVP_AVAILABLE;
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const racePlayerLabel = playerName?.trim() || "You";
   const raceOpponentLabel = isRacePvp ? (raceOpponentName || "Opponent") : "CPU";
   const raceRoomStatusConfig = {
@@ -2137,6 +2138,19 @@ export default function App() {
                   <div style={{ fontSize: 12, color: C.muted }}>
                     Socket server: <b style={{ color: C.text }}>{SOCKET_SERVER_URL || "Not configured"}</b>
                   </div>
+                  <div style={{ fontSize: 12, color: C.muted }}>
+                    Browser origin: <b style={{ color: C.text }}>{browserOrigin || "unknown"}</b>
+                  </div>
+                  {SOCKET_SERVER_URL && browserOrigin && (
+                    <a
+                      href={`${SOCKET_SERVER_URL}/debug/cors?origin=${encodeURIComponent(browserOrigin)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontSize: 12, color: C.gold, textDecoration: "underline" }}
+                    >
+                      Check CORS match on socket server
+                    </a>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: raceRoomStatusInfo.color, background: raceRoomStatusInfo.bg, borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}` }}>
                       {raceRoomStatusInfo.label}

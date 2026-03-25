@@ -4,15 +4,20 @@ import { Server } from "socket.io";
 const PORT = Number(process.env.PORT || 3001);
 const RAW_ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "").trim();
 const ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS
-    .split(",")
-    .map((origin) => origin.trim())
+    .split(/[\n,;]+/)
+    .map((origin) => normalizeOrigin(origin.trim()))
     .filter(Boolean);
+
+function normalizeOrigin(value) {
+    return String(value || "").trim().replace(/\/+$/, "");
+}
 
 function escapeRegex(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function toOriginMatcher(pattern) {
+    pattern = normalizeOrigin(pattern);
     if (pattern === "*") return /^.*$/;
     if (!pattern.includes("*")) return null;
     const regexSource = `^${pattern.split("*").map(escapeRegex).join(".*")}$`;
@@ -24,6 +29,7 @@ const ALLOWED_ORIGIN_MATCHERS = ALLOWED_ORIGINS
     .filter(Boolean);
 
 function isOriginAllowed(origin) {
+    origin = normalizeOrigin(origin);
     if (ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes("*")) return true;
     if (ALLOWED_ORIGINS.includes(origin)) return true;
     return ALLOWED_ORIGIN_MATCHERS.some((matcher) => matcher.test(origin));
@@ -45,7 +51,17 @@ function corsOriginValidator(origin, callback) {
 const httpServer = createServer((req, res) => {
     if (req.url === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, service: "angular-quest-socket" }));
+        res.end(JSON.stringify({ ok: true, service: "angular-quest-socket", allowedOrigins: ALLOWED_ORIGINS }));
+        return;
+    }
+
+    if (req.url?.startsWith("/debug/cors")) {
+        const base = `http://localhost:${PORT}`;
+        const url = new URL(req.url, base);
+        const origin = normalizeOrigin(url.searchParams.get("origin") || "");
+        const allowed = origin ? isOriginAllowed(origin) : false;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ origin, allowed, allowedOrigins: ALLOWED_ORIGINS }));
         return;
     }
 
