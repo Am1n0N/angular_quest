@@ -49,7 +49,42 @@ function corsOriginValidator(origin, callback) {
     callback(allowed ? null : new Error("Origin not allowed by CORS"), allowed);
 }
 
+function applyHttpCors(req, res) {
+    const origin = normalizeOrigin(req.headers.origin || "");
+    if (!origin) return true;
+
+    const allowed = isOriginAllowed(origin);
+    if (!allowed) {
+        console.warn(`HTTP CORS blocked origin: ${origin}`);
+        return false;
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    return true;
+}
+
 const httpServer = createServer((req, res) => {
+    const corsAllowed = applyHttpCors(req, res);
+    if (req.method === "OPTIONS") {
+        if (!corsAllowed) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Origin not allowed by CORS" }));
+            return;
+        }
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
+    if (!corsAllowed) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Origin not allowed by CORS" }));
+        return;
+    }
+
     if (req.url === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, service: "angular-quest-socket", allowedOrigins: ALLOWED_ORIGINS }));
