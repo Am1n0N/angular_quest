@@ -869,6 +869,10 @@ export default function App() {
   const [raceOpponentName, setRaceOpponentName] = useState("Opponent");
   const [raceOpponentReady, setRaceOpponentReady] = useState(false);
   const [raceHadOpponent, setRaceHadOpponent] = useState(false);
+  const [raceRoomCapacityInfo, setRaceRoomCapacityInfo] = useState("");
+  const [raceActiveSessions, setRaceActiveSessions] = useState([]);
+  const [raceSessionsLoading, setRaceSessionsLoading] = useState(false);
+  const [raceSessionsError, setRaceSessionsError] = useState("");
   const [dailyClaimDate, setDailyClaimDate] = useState("");
   const importFileRef = useRef(null);
   const timer = useRef(null);
@@ -969,6 +973,44 @@ export default function App() {
   }, [raceRoomInput]);
 
   useEffect(() => {
+    if (screen !== "intro" || raceMode !== "pvp" || !PVP_AVAILABLE || !SOCKET_SERVER_URL) {
+      setRaceActiveSessions([]);
+      setRaceSessionsLoading(false);
+      setRaceSessionsError("");
+      return;
+    }
+
+    let disposed = false;
+
+    const loadSessions = async () => {
+      try {
+        const response = await fetch(`${SOCKET_SERVER_URL}/rooms`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Unable to load active sessions (${response.status})`);
+        const payload = await response.json();
+        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        if (!disposed) {
+          setRaceActiveSessions(sessions);
+          setRaceSessionsError("");
+        }
+      } catch (error) {
+        if (!disposed) {
+          setRaceSessionsError(error instanceof Error ? error.message : "Unable to load active sessions.");
+        }
+      } finally {
+        if (!disposed) setRaceSessionsLoading(false);
+      }
+    };
+
+    setRaceSessionsLoading(true);
+    loadSessions();
+    const id = setInterval(loadSessions, 5000);
+    return () => {
+      disposed = true;
+      clearInterval(id);
+    };
+  }, [screen, raceMode, PVP_AVAILABLE, SOCKET_SERVER_URL]);
+
+  useEffect(() => {
     safeLocalSet(PUZZLE_PROFILE_KEY, {
       chips: puzzleChips,
       streak: puzzleStreak,
@@ -1025,7 +1067,7 @@ export default function App() {
   const racePlayerProgress = Math.min(100, (racePlayerDistance / RACE_DISTANCE) * 100);
   const raceCpuProgress = Math.min(100, (raceCpuDistance / RACE_DISTANCE) * 100);
   const isRacePvp = raceMode === "pvp" && PVP_AVAILABLE;
-  const showRacePreMatchOverlay = isRacePvp && !raceOpponentReady && (raceSocketStatus === "idle" || raceSocketStatus === "connecting" || raceSocketStatus === "waiting");
+  const showRacePreMatchOverlay = isRacePvp && !raceOpponentReady && (raceSocketStatus === "idle" || raceSocketStatus === "connecting" || raceSocketStatus === "waiting" || raceSocketStatus === "full");
   const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const racePlayerLabel = playerName?.trim() || "You";
   const raceOpponentLabel = isRacePvp ? (raceOpponentName || "Opponent") : "CPU";
@@ -1034,6 +1076,7 @@ export default function App() {
     connecting: { label: "Connecting", color: "#0d5f80", bg: "rgba(13,95,128,0.12)", message: "Connecting to socket server…" },
     waiting: { label: "Waiting", color: "#a35000", bg: "rgba(163,80,0,0.12)", message: `Waiting for another player to join room ${raceRoomCode || "-"}.` },
     matched: { label: "Matched", color: "#1f7a5c", bg: "rgba(31,122,92,0.12)", message: `${raceOpponentLabel} joined room ${raceRoomCode || "-"}. Race is live.` },
+    full: { label: "Room Full", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: `Room ${raceRoomCode || raceRoomInput || "-"} already has 2/2 players. Choose another room code.` },
     disconnected: { label: "Disconnected", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "Connection dropped. Rejoin the room to continue PvP." },
     error: { label: "Error", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "Could not connect to socket server. Check server and URL." },
     unavailable: { label: "Unavailable", color: "#b02f4b", bg: "rgba(176,47,75,0.12)", message: "PvP requires a deployed Socket.IO server. Set VITE_SOCKET_SERVER_URL." },
@@ -1197,6 +1240,7 @@ export default function App() {
     setRaceOpponentName("Opponent");
     setRaceOpponentReady(false);
     setRaceHadOpponent(false);
+    setRaceRoomCapacityInfo("");
   }, []);
 
   const startRace = useCallback((name = playerName, mode = raceMode) => {
@@ -1263,6 +1307,7 @@ export default function App() {
       setRaceOpponentName("Waiting...");
       setRaceOpponentReady(false);
       setRaceHadOpponent(false);
+      setRaceRoomCapacityInfo("");
 
       socket.on("connect", () => {
         setRaceSocketStatus("waiting");
@@ -1317,6 +1362,14 @@ export default function App() {
         setRaceCpuSpeed(RACE_BASE_CPU_SPEED);
       });
 
+      socket.on("race:room-full", (payload = {}) => {
+        setRaceSocketStatus("full");
+        setRaceOpponentReady(false);
+        setRaceHadOpponent(false);
+        setRaceOpponentName("Room Full");
+        setRaceRoomCapacityInfo(`${Number(payload.currentPlayers) || 2}/${Number(payload.maxPlayers) || 2}`);
+      });
+
       socket.on("disconnect", () => {
         setRaceSocketStatus("disconnected");
         setRaceOpponentReady(false);
@@ -1331,6 +1384,7 @@ export default function App() {
       setRaceOpponentName("CPU");
       setRaceOpponentReady(true);
       setRaceHadOpponent(false);
+      setRaceRoomCapacityInfo("");
     }
 
     setScreen("raceGame");
@@ -2217,7 +2271,59 @@ export default function App() {
                     <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: raceRoomStatusInfo.color, background: raceRoomStatusInfo.bg, borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}` }}>
                       {raceRoomStatusInfo.label}
                     </span>
+                    {raceSocketStatus === "full" && (
+                      <span style={{ fontSize: 11, color: "#b02f4b", background: "rgba(176,47,75,0.12)", borderRadius: 999, padding: "4px 10px", border: `1px solid ${C.border}` }}>
+                        Max Players {raceRoomCapacityInfo || "2/2"}
+                      </span>
+                    )}
                     <span style={{ fontSize: 12, color: C.muted }}>{raceRoomStatusInfo.message}</span>
+                  </div>
+
+                  <div style={{ marginTop: 4, borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.72)", padding: "8px 10px", display: "grid", gap: 6 }}>
+                    <div style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: 1 }}>Active Sessions</div>
+                    {raceSessionsLoading && raceActiveSessions.length === 0 && (
+                      <div style={{ fontSize: 12, color: C.muted }}>Loading active sessions…</div>
+                    )}
+                    {!raceSessionsLoading && raceActiveSessions.length === 0 && !raceSessionsError && (
+                      <div style={{ fontSize: 12, color: C.muted }}>No active sessions right now. Create or join with room code.</div>
+                    )}
+                    {raceSessionsError && (
+                      <div style={{ fontSize: 12, color: "#b02f4b" }}>{raceSessionsError}</div>
+                    )}
+                    {raceActiveSessions.slice(0, 6).map((session) => {
+                      const roomCode = String(session?.roomCode || "").trim().toUpperCase();
+                      const playerCount = Number(session?.playerCount || 0);
+                      const maxPlayers = Number(session?.maxPlayers || 2);
+                      const players = Array.isArray(session?.players) ? session.players : [];
+                      const isJoinable = Boolean(session?.isJoinable);
+                      return (
+                        <div key={roomCode} style={{ borderRadius: 8, border: `1px solid ${C.border}`, background: "rgba(255,255,255,0.78)", padding: "7px 8px", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <div style={{ display: "grid", gap: 1 }}>
+                            <div style={{ fontSize: 12, color: C.text, fontWeight: 700, letterSpacing: 0.5 }}>{roomCode || "-"}</div>
+                            <div style={{ fontSize: 11, color: C.muted }}>{playerCount}/{maxPlayers} players • {players.join(" vs ") || "Waiting"}</div>
+                          </div>
+                          <button
+                            className="casino-btn"
+                            onClick={() => {
+                              setRaceRoomInput(roomCode);
+                              setRaceSocketStatus("idle");
+                            }}
+                            disabled={!isJoinable || !roomCode}
+                            style={{
+                              background: isJoinable ? "linear-gradient(135deg, #ffd700, #ff8c00)" : "rgba(255,255,255,0.8)",
+                              color: isJoinable ? "#3a2400" : C.faint,
+                              border: `1px solid ${C.border}`,
+                              borderRadius: 999,
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              opacity: isJoinable ? 1 : 0.7,
+                            }}
+                          >
+                            {isJoinable ? "Pick" : "Full"}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -3150,7 +3256,7 @@ export default function App() {
                 </div>
 
                 <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 22, color: C.text, marginBottom: 6, animation: "neonPulse 1.1s infinite" }}>
-                  {raceSocketStatus === "connecting" ? "Connecting to server…" : "Waiting for second player…"}
+                  {raceSocketStatus === "connecting" ? "Connecting to server…" : raceSocketStatus === "full" ? "Room is full" : "Waiting for second player…"}
                 </div>
 
                 <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6, marginBottom: 12 }}>

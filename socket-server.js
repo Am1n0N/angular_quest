@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 
 const PORT = Number(process.env.PORT || 3001);
+const MAX_PLAYERS_PER_ROOM = 2;
 const RAW_ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "").trim();
 const ALLOWED_ORIGINS = RAW_ALLOWED_ORIGINS
     .split(/[\n,;]+/)
@@ -65,6 +66,12 @@ const httpServer = createServer((req, res) => {
         return;
     }
 
+    if (req.url === "/rooms") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ sessions: getActiveSessions() }));
+        return;
+    }
+
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("Angular Quest PvP socket server is running.\n");
 });
@@ -78,6 +85,19 @@ const io = new Server(httpServer, {
 });
 
 const rooms = new Map();
+
+function getActiveSessions() {
+    return [...rooms.entries()].map(([roomCode, roomMap]) => {
+        const players = [...roomMap.values()].map((player) => player.name || "Guest");
+        return {
+            roomCode,
+            players,
+            playerCount: roomMap.size,
+            maxPlayers: MAX_PLAYERS_PER_ROOM,
+            isJoinable: roomMap.size < MAX_PLAYERS_PER_ROOM,
+        };
+    });
+}
 
 function emitPresence(roomCode) {
     const roomMap = rooms.get(roomCode);
@@ -113,6 +133,16 @@ io.on("connection", (socket) => {
         if (!roomCode) return;
 
         leaveRoom();
+
+        const roomMap = rooms.get(roomCode);
+        if (roomMap && roomMap.size >= MAX_PLAYERS_PER_ROOM) {
+            socket.emit("race:room-full", {
+                roomCode,
+                maxPlayers: MAX_PLAYERS_PER_ROOM,
+                currentPlayers: roomMap.size,
+            });
+            return;
+        }
 
         const playerName = String(payload.playerName || "Guest").trim().slice(0, 32) || "Guest";
         socket.data.roomCode = roomCode;
